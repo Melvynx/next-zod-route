@@ -322,4 +322,38 @@ describe('combined validation', () => {
     expect(response.status).toBe(400);
     expect(data).toEqual({ message: 'CustomError', details: 'Test error' });
   });
+
+  it('should handle multiple middlewares with access to metadata and previous middleware data', async () => {
+    const X = createZodRoute({
+      defineMetadataSchema: () =>
+        z.object({
+          role: z.string(),
+        }),
+    });
+    const GET = X.metadata({ role: 'string' })
+      .use(async ({ context }) => {
+        expectTypeOf(context).toMatchTypeOf<unknown>();
+        return { user: { id: 'user-123' } };
+      })
+      .use(async ({ metadata, context }) => {
+        expectTypeOf(metadata).toMatchTypeOf<{ role: string } | undefined>();
+        expectTypeOf(context).toMatchTypeOf<{ user: { id: string } }>();
+        return { permissions: ['read', 'write'] };
+      })
+      .handler((request, context) => {
+        expect(context).toEqual({
+          user: { id: 'user-123' },
+          permissions: ['read', 'write'],
+        });
+        return new Response(JSON.stringify({ message: 'Middlewares executed successfully' }), { status: 200 });
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: { id: '550e8400-e29b-41d4-a716-446655440000' } });
+    const data = await response.json();
+    console.log(data);
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({ message: 'Middlewares executed successfully' });
+  });
 });
