@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import { createSafeRoute } from '.';
@@ -20,6 +20,7 @@ describe('params validation', () => {
     const GET = createSafeRoute()
       .params(paramsSchema)
       .handler((request, context) => {
+        expectTypeOf(context.params).toMatchTypeOf<z.infer<typeof paramsSchema>>();
         const { id } = context.params;
         return Response.json({ id }, { status: 200 });
       });
@@ -51,12 +52,11 @@ describe('params validation', () => {
 
 describe('query validation', () => {
   it('should validate and handle valid query', async () => {
-    const GET = createSafeRoute()
-      .query(querySchema)
-      .handler((request, context) => {
-        const search = context.query.search;
-        return Response.json({ search }, { status: 200 });
-      });
+    const GET = createSafeRoute().handler((request, context) => {
+      expectTypeOf(context.query).toMatchTypeOf<z.infer<typeof querySchema>>();
+      const search = context.query.search;
+      return Response.json({ search }, { status: 200 });
+    });
 
     const request = new Request('http://localhost/?search=test');
     const response = await GET(request);
@@ -88,6 +88,7 @@ describe('body validation', () => {
     const POST = createSafeRoute()
       .body(bodySchema)
       .handler((request, context) => {
+        expectTypeOf(context.body).toMatchTypeOf<z.infer<typeof bodySchema>>();
         const field = context.body.field;
         return Response.json({ field }, { status: 200 });
       });
@@ -240,6 +241,8 @@ describe('combined validation', () => {
         const { id } = context.params;
         const { user } = context.data;
 
+        expectTypeOf(user).toMatchTypeOf<{ id: string }>();
+
         return Response.json({ id, user }, { status: 200 });
       });
 
@@ -270,6 +273,9 @@ describe('combined validation', () => {
       .handler((request, context) => {
         const { id } = context.params;
         const { user, permissions } = context.data;
+
+        expectTypeOf(user).toMatchTypeOf<{ id: string }>();
+        expectTypeOf(permissions).toMatchTypeOf<string[]>();
 
         return Response.json({ id, user, permissions }, { status: 200 });
       });
