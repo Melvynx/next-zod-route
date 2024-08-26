@@ -1,4 +1,4 @@
-import { Infer, Schema, validate } from '@typeschema/main';
+import z from 'zod';
 
 import { HandlerFunction, HandlerServerErrorFn, OriginalRouteHandler, RouteHandlerBuilderConfig } from './types';
 
@@ -11,9 +11,9 @@ interface RouteHandlerBuilderConstructorParams {
 }
 
 export class RouteHandlerBuilder<
-  TParams extends Schema = Schema,
-  TQuery extends Schema = Schema,
-  TBody extends Schema = Schema,
+  TParams extends z.Schema = z.Schema,
+  TQuery extends z.Schema = z.Schema,
+  TBody extends z.Schema = z.Schema,
   TContext extends Record<string, unknown> = Record<string, unknown>,
 > {
   private config: RouteHandlerBuilderConfig;
@@ -39,7 +39,7 @@ export class RouteHandlerBuilder<
    * @param schema - The schema for the params
    * @returns A new instance of the RouteHandlerBuilder
    */
-  params<T extends Schema>(schema: T): RouteHandlerBuilder<T, TQuery, TBody> {
+  params<T extends z.Schema>(schema: T): RouteHandlerBuilder<T, TQuery, TBody> {
     return new RouteHandlerBuilder<T, TQuery, TBody, TContext>({
       ...this,
       config: { ...this.config, paramsSchema: schema },
@@ -51,7 +51,7 @@ export class RouteHandlerBuilder<
    * @param schema - The schema for the query
    * @returns A new instance of the RouteHandlerBuilder
    */
-  query<T extends Schema>(schema: T): RouteHandlerBuilder<TParams, T, TBody> {
+  query<T extends z.Schema>(schema: T): RouteHandlerBuilder<TParams, T, TBody> {
     return new RouteHandlerBuilder<TParams, T, TBody, TContext>({
       ...this,
       config: { ...this.config, querySchema: schema },
@@ -63,7 +63,7 @@ export class RouteHandlerBuilder<
    * @param schema - The schema for the body
    * @returns A new instance of the RouteHandlerBuilder
    */
-  body<T extends Schema>(schema: T): RouteHandlerBuilder<TParams, TQuery, T> {
+  body<T extends z.Schema>(schema: T): RouteHandlerBuilder<TParams, TQuery, T> {
     return new RouteHandlerBuilder<TParams, TQuery, T, TContext>({
       ...this,
       config: { ...this.config, bodySchema: schema },
@@ -89,7 +89,7 @@ export class RouteHandlerBuilder<
    * @param handler - The handler function that will be called when the route is hit
    * @returns The original route handler that Next.js expects with the validation logic
    */
-  handler(handler: HandlerFunction<Infer<TParams>, Infer<TQuery>, Infer<TBody>, TContext>): OriginalRouteHandler {
+  handler(handler: HandlerFunction<z.infer<TParams>, z.infer<TQuery>, z.infer<TBody>, TContext>): OriginalRouteHandler {
     return async (request, context): Promise<Response> => {
       try {
         const url = new URL(request.url);
@@ -99,25 +99,25 @@ export class RouteHandlerBuilder<
 
         // Validate the params against the provided schema
         if (this.config.paramsSchema) {
-          const paramsResult = await validate(this.config.paramsSchema, params);
+          const paramsResult = this.config.paramsSchema.safeParse(params);
           if (!paramsResult.success) {
-            throw new Error(JSON.stringify({ message: 'Invalid params', errors: paramsResult.issues }));
+            throw new Error(JSON.stringify({ message: 'Invalid params', errors: paramsResult.error.issues }));
           }
         }
 
         // Validate the query against the provided schema
         if (this.config.querySchema) {
-          const queryResult = await validate(this.config.querySchema, query);
+          const queryResult = this.config.querySchema.safeParse(query);
           if (!queryResult.success) {
-            throw new Error(JSON.stringify({ message: 'Invalid query', errors: queryResult.issues }));
+            throw new Error(JSON.stringify({ message: 'Invalid query', errors: queryResult.error.issues }));
           }
         }
 
         // Validate the body against the provided schema
         if (this.config.bodySchema) {
-          const bodyResult = await validate(this.config.bodySchema, body);
+          const bodyResult = this.config.bodySchema.safeParse(body);
           if (!bodyResult.success) {
-            throw new Error(JSON.stringify({ message: 'Invalid body', errors: bodyResult.issues }));
+            throw new Error(JSON.stringify({ message: 'Invalid body', errors: bodyResult.error.issues }));
           }
         }
 
@@ -130,9 +130,9 @@ export class RouteHandlerBuilder<
 
         // Call the handler function with the validated params, query, and body
         const result = await handler(request, {
-          params: params as Infer<TParams>,
-          query: query as Infer<TQuery>,
-          body: body as Infer<TBody>,
+          params: params as z.infer<TParams>,
+          query: query as z.infer<TQuery>,
+          body: body as z.infer<TBody>,
           data: middlewareContext,
         });
         return result;

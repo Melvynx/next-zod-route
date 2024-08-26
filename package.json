@@ -1,7 +1,7 @@
 {
-  "name": "next-safe-route",
-  "version": "0.0.19",
-  "description": "A safer way to define route handlers in Next.js",
+  "name": "next-zod-route",
+  "version": "0.0.1",
+  "description": "A zod way to define route handlers in Next.js",
   "keywords": [
     "next",
     "nextjs",
@@ -10,22 +10,24 @@
     "nextjs safe",
     "nextjs safe route",
     "next api route",
-    "nextjs api route"
+    "nextjs api route",
+    "nextjs zod route",
+    "nextjs zod api route"
   ],
-  "homepage": "https://github.com/richardsolomou/next-safe-route#readme",
+  "homepage": "https://github.com/melvynx/next-zod-route#readme",
   "bugs": {
-    "url": "https://github.com/richardsolomou/next-safe-route/issues",
-    "email": "richard@solomou.dev"
+    "url": "https://github.com/melvynxdev/next-zod-route/issues",
+    "email": "melvyn@melvynx.com"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/richardsolomou/next-safe-route"
+    "url": "https://github.com/melvynxdev/next-zod-route"
   },
   "license": "MIT",
   "author": {
-    "name": "Richard Solomou",
-    "email": "richard@solomou.dev",
-    "url": "https://solomou.dev"
+    "name": "Melvyn Malherbe",
+    "email": "melvyn@melvynx.com",
+    "url": "https://melvynx.com"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -52,8 +54,7 @@
     ]
   },
   "dependencies": {
-    "@typeschema/main": "^0.13.9",
-    "@typeschema/zod": "^0.13.3"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@swc/core": "^1.5.29",
@@ -67,8 +68,7 @@
     "release-it": "^17.3.0",
     "tsup": "^8.1.0",
     "typescript": "^5.4.5",
-    "vitest": "^1.6.0",
-    "zod": "^3.23.8"
+    "vitest": "^1.6.0"
   },
   "packageManager": "pnpm@9.1.2",
   "engines": {

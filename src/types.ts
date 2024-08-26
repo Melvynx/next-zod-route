@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Schema } from '@typeschema/main';
+import { Schema } from 'zod';
 
 export type HandlerFunction<TParams, TQuery, TBody, TContext> = (
   request: Request,
