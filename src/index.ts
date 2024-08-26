@@ -1,2 +1,2 @@
-export { createZodRoute as createSafeRoute } from './createZodRoute';
+export { createZodRoute } from './createZodRoute';
 export { type HandlerFunction, type RouteHandlerBuilderConfig } from './types';

@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import { createSafeRoute } from '.';
+import { createZodRoute } from '.';
 
 const paramsSchema = z.object({
   id: z.string().uuid(),
@@ -17,7 +17,7 @@ const bodySchema = z.object({
 
 describe('params validation', () => {
   it('should validate and handle valid params', async () => {
-    const GET = createSafeRoute()
+    const GET = createZodRoute()
       .params(paramsSchema)
       .handler((request, context) => {
         expectTypeOf(context.params).toMatchTypeOf<z.infer<typeof paramsSchema>>();
@@ -34,7 +34,7 @@ describe('params validation', () => {
   });
 
   it('should return an error for invalid params', async () => {
-    const GET = createSafeRoute()
+    const GET = createZodRoute()
       .params(paramsSchema)
       .handler((request, context) => {
         const { id } = context.params;
@@ -52,7 +52,7 @@ describe('params validation', () => {
 
 describe('query validation', () => {
   it('should validate and handle valid query', async () => {
-    const GET = createSafeRoute().handler((request, context) => {
+    const GET = createZodRoute().handler((request, context) => {
       expectTypeOf(context.query).toMatchTypeOf<z.infer<typeof querySchema>>();
       const search = context.query.search;
       return Response.json({ search }, { status: 200 });
@@ -67,7 +67,7 @@ describe('query validation', () => {
   });
 
   it('should return an error for invalid query', async () => {
-    const GET = createSafeRoute()
+    const GET = createZodRoute()
       .query(querySchema)
       .handler((request, context) => {
         const search = context.query.search;
@@ -85,7 +85,7 @@ describe('query validation', () => {
 
 describe('body validation', () => {
   it('should validate and handle valid body', async () => {
-    const POST = createSafeRoute()
+    const POST = createZodRoute()
       .body(bodySchema)
       .handler((request, context) => {
         expectTypeOf(context.body).toMatchTypeOf<z.infer<typeof bodySchema>>();
@@ -105,7 +105,7 @@ describe('body validation', () => {
   });
 
   it('should return an error for invalid body', async () => {
-    const POST = createSafeRoute()
+    const POST = createZodRoute()
       .body(bodySchema)
       .handler((request, context) => {
         const field = context.body.field;
@@ -126,7 +126,7 @@ describe('body validation', () => {
 
 describe('combined validation', () => {
   it('should validate and handle valid request with params, query, and body', async () => {
-    const POST = createSafeRoute()
+    const POST = createZodRoute()
       .params(paramsSchema)
       .query(querySchema)
       .body(bodySchema)
@@ -155,7 +155,7 @@ describe('combined validation', () => {
   });
 
   it('should return an error for invalid params in combined validation', async () => {
-    const POST = createSafeRoute()
+    const POST = createZodRoute()
       .params(paramsSchema)
       .query(querySchema)
       .body(bodySchema)
@@ -180,7 +180,7 @@ describe('combined validation', () => {
   });
 
   it('should return an error for invalid query in combined validation', async () => {
-    const POST = createSafeRoute()
+    const POST = createZodRoute()
       .params(paramsSchema)
       .query(querySchema)
       .body(bodySchema)
@@ -205,7 +205,7 @@ describe('combined validation', () => {
   });
 
   it('should return an error for invalid body in combined validation', async () => {
-    const POST = createSafeRoute()
+    const POST = createZodRoute()
       .params(paramsSchema)
       .query(querySchema)
       .body(bodySchema)
@@ -234,7 +234,7 @@ describe('combined validation', () => {
       return { user: { id: 'user-123', role: 'admin' } };
     };
 
-    const GET = createSafeRoute()
+    const GET = createZodRoute()
       .use(middleware)
       .params(paramsSchema)
       .handler((request, context) => {
@@ -266,7 +266,7 @@ describe('combined validation', () => {
       return { permissions: ['read', 'write'] };
     };
 
-    const GET = createSafeRoute()
+    const GET = createZodRoute()
       .use(middleware1)
       .use(middleware2)
       .params(paramsSchema)
@@ -307,7 +307,7 @@ describe('combined validation', () => {
       return new Response(JSON.stringify({ message: 'Something went wrong' }), { status: 400 });
     };
 
-    const GET = createSafeRoute({
+    const GET = createZodRoute({
       handleServerError,
     })
       .params(paramsSchema)
