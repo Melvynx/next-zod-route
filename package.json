@@ -1,6 +1,6 @@
 {
   "name": "next-zod-route",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "A zod way to define route handlers in Next.js",
   "keywords": [
     "next",
@@ -16,12 +16,12 @@
   ],
   "homepage": "https://github.com/melvynx/next-zod-route#readme",
   "bugs": {
-    "url": "https://github.com/melvynxdev/next-zod-route/issues",
+    "url": "https://github.com/melvynx/next-zod-route/issues",
     "email": "melvyn@melvynx.com"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/melvynxdev/next-zod-route"
+    "url": "https://github.com/melvynx/next-zod-route"
   },
   "license": "MIT",
   "author": {
