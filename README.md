@@ -12,8 +12,8 @@ A fork from [next-safe-route](https://github.com/richardsolomou/next-safe-route)
 
 ## Features
 
-- **✅ Schema Validation:** Automatically validate request parameters, query strings, and body content with built-in error handling.
-- **🧷 Type-Safe:** Work with full TypeScript type safety for parameters, query strings, and body content.
+- **✅ Schema Validation:** Automatically validates request parameters, query strings, and body content with built-in error handling.
+- **🧷 Type-Safe:** Works with full TypeScript type safety for parameters, query strings, and body content.
 - **😌 Easy to Use:** Simple and intuitive API that makes defining route handlers a breeze.
 - **🔗 Extensible:** Compatible with any validation library supported by [TypeSchema](https://typeschema.com).
 - **🧪 Fully Tested:** Extensive test suite to ensure everything works reliably.
