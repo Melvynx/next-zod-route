@@ -1,7 +1,7 @@
 // eslint-disable-next-line import/no-named-as-default
 import z from 'zod';
 
-import { HandlerFunction, HandlerServerErrorFn, OriginalRouteHandler, RouteHandlerBuilderConfig } from './types';
+import { HandlerFunction, HandlerServerErrorFn, OriginalRouteHandler } from './types';
 
 type Middleware<
   TContext = Record<string, unknown>,
@@ -26,7 +26,11 @@ export class RouteHandlerBuilder<
   TBody extends z.Schema = z.Schema,
   TContext = Record<string, unknown>,
 > {
-  readonly config: RouteHandlerBuilderConfig;
+  readonly config: {
+    paramsSchema: TParams;
+    querySchema: TQuery;
+    bodySchema: TBody;
+  };
   readonly middlewares: Middleware<TContext, TMetadata>[];
   readonly handleServerError?: HandlerServerErrorFn;
   readonly metadataSchema: TMetadataSchema;
