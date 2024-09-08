@@ -1,25 +1,39 @@
 // eslint-disable-next-line import/no-named-as-default
 import z from 'zod';
 
-import { HandlerFunction, HandlerServerErrorFn, OriginalRouteHandler, RouteHandlerBuilderConfig } from './types';
+import { HandlerFunction, HandlerServerErrorFn, OriginalRouteHandler } from './types';
 
-type Middleware<T = Record<string, unknown>> = (request: Request) => Promise<T>;
+type Middleware<TContext = Record<string, unknown>, TReturnType = Record<string, unknown>> = (opts: {
+  request: Request;
+  context?: TContext;
+}) => Promise<TReturnType>;
 
-interface RouteHandlerBuilderConstructorParams {
-  config?: RouteHandlerBuilderConfig;
-  middlewares?: Middleware[];
-  handleServerError?: HandlerServerErrorFn;
-}
+/**
+ * Type of the middleware function passed to a safe action client.
+ */
+export type MiddlewareFn<TContext, TReturnType> = {
+  (opts: { context: TContext; request: Request }): Promise<TReturnType>;
+};
+
+class InternalRouteHandlerError extends Error {}
 
 export class RouteHandlerBuilder<
   TParams extends z.Schema = z.Schema,
   TQuery extends z.Schema = z.Schema,
   TBody extends z.Schema = z.Schema,
-  TContext extends Record<string, unknown> = Record<string, unknown>,
+  // eslint-disable-next-line @typescript-eslint/ban-types
+  TContext = {},
+  TMetadata = unknown,
 > {
-  private config: RouteHandlerBuilderConfig;
-  private middlewares: Middleware[];
-  private handleServerError?: HandlerServerErrorFn;
+  readonly config: {
+    paramsSchema: TParams;
+    querySchema: TQuery;
+    bodySchema: TBody;
+  };
+  readonly middlewares: Middleware<TContext, TMetadata>[];
+  readonly handleServerError?: HandlerServerErrorFn;
+  readonly metadataValue: TMetadata;
+  readonly contextType!: TContext;
 
   constructor({
     config = {
@@ -29,10 +43,24 @@ export class RouteHandlerBuilder<
     },
     middlewares = [],
     handleServerError,
-  }: RouteHandlerBuilderConstructorParams = {}) {
+    metadataValue,
+    contextType,
+  }: {
+    config?: {
+      paramsSchema: TParams;
+      querySchema: TQuery;
+      bodySchema: TBody;
+    };
+    middlewares?: Middleware<TContext, TMetadata>[];
+    handleServerError?: HandlerServerErrorFn;
+    metadataValue: TMetadata;
+    contextType: TContext;
+  }) {
     this.config = config;
     this.middlewares = middlewares;
     this.handleServerError = handleServerError;
+    this.metadataValue = metadataValue;
+    this.contextType = contextType as TContext;
   }
 
   /**
@@ -40,8 +68,8 @@ export class RouteHandlerBuilder<
    * @param schema - The schema for the params
    * @returns A new instance of the RouteHandlerBuilder
    */
-  params<T extends z.Schema>(schema: T): RouteHandlerBuilder<T, TQuery, TBody, TContext> {
-    return new RouteHandlerBuilder<T, TQuery, TBody, TContext>({
+  params<T extends z.Schema>(schema: T) {
+    return new RouteHandlerBuilder({
       ...this,
       config: { ...this.config, paramsSchema: schema },
     });
@@ -52,8 +80,8 @@ export class RouteHandlerBuilder<
    * @param schema - The schema for the query
    * @returns A new instance of the RouteHandlerBuilder
    */
-  query<T extends z.Schema>(schema: T): RouteHandlerBuilder<TParams, T, TBody, TContext> {
-    return new RouteHandlerBuilder<TParams, T, TBody, TContext>({
+  query<T extends z.Schema>(schema: T) {
+    return new RouteHandlerBuilder({
       ...this,
       config: { ...this.config, querySchema: schema },
     });
@@ -64,8 +92,8 @@ export class RouteHandlerBuilder<
    * @param schema - The schema for the body
    * @returns A new instance of the RouteHandlerBuilder
    */
-  body<T extends z.Schema>(schema: T): RouteHandlerBuilder<TParams, TQuery, T, TContext> {
-    return new RouteHandlerBuilder<TParams, TQuery, T, TContext>({
+  body<T extends z.Schema>(schema: T) {
+    return new RouteHandlerBuilder({
       ...this,
       config: { ...this.config, bodySchema: schema },
     });
@@ -76,12 +104,12 @@ export class RouteHandlerBuilder<
    * @param middleware - The middleware function to be executed
    * @returns A new instance of the RouteHandlerBuilder
    */
-  use<T extends Record<string, unknown>>(
-    middleware: Middleware<T>,
-  ): RouteHandlerBuilder<TParams, TQuery, TBody, TContext & T> {
-    return new RouteHandlerBuilder<TParams, TQuery, TBody, TContext & T>({
+  use<TNewContext>(middleware: MiddlewareFn<TContext, TNewContext>) {
+    type MergedContext = TContext & TNewContext;
+    return new RouteHandlerBuilder<TParams, TQuery, TBody, MergedContext, TMetadata>({
       ...this,
       middlewares: [...this.middlewares, middleware],
+      contextType: {} as MergedContext,
     });
   }
 
@@ -102,7 +130,9 @@ export class RouteHandlerBuilder<
         if (this.config.paramsSchema) {
           const paramsResult = this.config.paramsSchema.safeParse(params);
           if (!paramsResult.success) {
-            throw new Error(JSON.stringify({ message: 'Invalid params', errors: paramsResult.error.issues }));
+            throw new InternalRouteHandlerError(
+              JSON.stringify({ message: 'Invalid params', errors: paramsResult.error.issues }),
+            );
           }
         }
 
@@ -110,7 +140,9 @@ export class RouteHandlerBuilder<
         if (this.config.querySchema) {
           const queryResult = this.config.querySchema.safeParse(query);
           if (!queryResult.success) {
-            throw new Error(JSON.stringify({ message: 'Invalid query', errors: queryResult.error.issues }));
+            throw new InternalRouteHandlerError(
+              JSON.stringify({ message: 'Invalid query', errors: queryResult.error.issues }),
+            );
           }
         }
 
@@ -118,14 +150,19 @@ export class RouteHandlerBuilder<
         if (this.config.bodySchema) {
           const bodyResult = this.config.bodySchema.safeParse(body);
           if (!bodyResult.success) {
-            throw new Error(JSON.stringify({ message: 'Invalid body', errors: bodyResult.error.issues }));
+            throw new InternalRouteHandlerError(
+              JSON.stringify({ message: 'Invalid body', errors: bodyResult.error.issues }),
+            );
           }
         }
 
         // Execute middlewares and build context
         let middlewareContext: TContext = {} as TContext;
         for (const middleware of this.middlewares) {
-          const result = await middleware(request);
+          const result = await middleware({
+            request,
+            context: middlewareContext,
+          });
           middlewareContext = { ...middlewareContext, ...result };
         }
 
@@ -138,12 +175,12 @@ export class RouteHandlerBuilder<
         });
         return result;
       } catch (error) {
-        if (this.handleServerError) {
-          return this.handleServerError(error as Error);
+        if (error instanceof InternalRouteHandlerError) {
+          return new Response(error.message, { status: 400 });
         }
 
-        if (error instanceof Error) {
-          return new Response(error.message, { status: 400 });
+        if (this.handleServerError) {
+          return this.handleServerError(error as Error);
         }
 
         return new Response(JSON.stringify({ message: 'Internal server error' }), { status: 500 });
