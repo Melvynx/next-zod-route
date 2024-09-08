@@ -9,8 +9,7 @@ export function createZodRoute<MetadataSchema extends z.Schema | undefined = und
 }) {
   return new RouteHandlerBuilder({
     handleServerError: params?.handleServerError,
-    contextType: {},
     metadataValue: undefined,
-    metadataSchema: (params?.defineMetadataSchema?.() ?? undefined) as MetadataSchema,
+    contextType: {},
   });
 }

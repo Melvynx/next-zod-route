@@ -3,17 +3,16 @@ import z from 'zod';
 
 import { HandlerFunction, HandlerServerErrorFn, OriginalRouteHandler } from './types';
 
-type Middleware<
-  TContext = Record<string, unknown>,
-  TMetadata = unknown,
-  TReturnType = Record<string, unknown>,
-> = (opts: { request: Request; metadata?: TMetadata; context?: TContext }) => Promise<TReturnType>;
+type Middleware<TContext = Record<string, unknown>, TReturnType = Record<string, unknown>> = (opts: {
+  request: Request;
+  context?: TContext;
+}) => Promise<TReturnType>;
 
 /**
  * Type of the middleware function passed to a safe action client.
  */
-export type MiddlewareFn<TMetadata, TContext, TReturnType> = {
-  (opts: { context: TContext; metadata: TMetadata; request: Request }): Promise<TReturnType>;
+export type MiddlewareFn<TContext, TReturnType> = {
+  (opts: { context: TContext; request: Request }): Promise<TReturnType>;
 };
 
 class InternalRouteHandlerError extends Error {}
@@ -21,10 +20,10 @@ class InternalRouteHandlerError extends Error {}
 export class RouteHandlerBuilder<
   TParams extends z.Schema = z.Schema,
   TQuery extends z.Schema = z.Schema,
-  TMetadataSchema extends z.Schema | undefined = undefined,
-  TMetadata = TMetadataSchema extends z.Schema ? z.infer<z.Schema> : undefined,
   TBody extends z.Schema = z.Schema,
-  TContext = Record<string, unknown>,
+  // eslint-disable-next-line @typescript-eslint/ban-types
+  TContext = {},
+  TMetadata = unknown,
 > {
   readonly config: {
     paramsSchema: TParams;
@@ -33,9 +32,8 @@ export class RouteHandlerBuilder<
   };
   readonly middlewares: Middleware<TContext, TMetadata>[];
   readonly handleServerError?: HandlerServerErrorFn;
-  readonly metadataSchema: TMetadataSchema;
   readonly metadataValue: TMetadata;
-  readonly contextType: TContext;
+  readonly contextType!: TContext;
 
   constructor({
     config = {
@@ -45,7 +43,6 @@ export class RouteHandlerBuilder<
     },
     middlewares = [],
     handleServerError,
-    metadataSchema,
     metadataValue,
     contextType,
   }: {
@@ -56,16 +53,14 @@ export class RouteHandlerBuilder<
     };
     middlewares?: Middleware<TContext, TMetadata>[];
     handleServerError?: HandlerServerErrorFn;
-    metadataSchema: TMetadataSchema;
     metadataValue: TMetadata;
     contextType: TContext;
   }) {
     this.config = config;
     this.middlewares = middlewares;
     this.handleServerError = handleServerError;
-    this.metadataSchema = metadataSchema;
     this.metadataValue = metadataValue;
-    this.contextType = contextType;
+    this.contextType = contextType as TContext;
   }
 
   /**
@@ -105,31 +100,16 @@ export class RouteHandlerBuilder<
   }
 
   /**
-   * Add metadata if the defineMetadataSchema is provided
-   * @param data - The value that matches the metadata schema
-   * @returns A new instance of the RouteHandlerBuilder
-   */
-  metadata(data: TMetadataSchema extends z.Schema ? z.infer<z.Schema> : undefined) {
-    if (!this.metadataSchema) {
-      throw new Error('Metadata schema is not defined');
-    }
-
-    return new RouteHandlerBuilder({
-      ...this,
-      metadataValue: data,
-    });
-  }
-
-  /**
    * Add a middleware to the route handler
    * @param middleware - The middleware function to be executed
    * @returns A new instance of the RouteHandlerBuilder
    */
-  use<TReturnType extends Record<string, unknown>>(middleware: MiddlewareFn<TMetadata, TContext, TReturnType>) {
-    return new RouteHandlerBuilder({
+  use<TNewContext>(middleware: MiddlewareFn<TContext, TNewContext>) {
+    type MergedContext = TContext & TNewContext;
+    return new RouteHandlerBuilder<TParams, TQuery, TBody, MergedContext, TMetadata>({
       ...this,
       middlewares: [...this.middlewares, middleware],
-      contextType: {} as unknown extends TContext ? TReturnType : TContext & TReturnType,
+      contextType: {} as MergedContext,
     });
   }
 
@@ -138,9 +118,7 @@ export class RouteHandlerBuilder<
    * @param handler - The handler function that will be called when the route is hit
    * @returns The original route handler that Next.js expects with the validation logic
    */
-  handler(
-    handler: HandlerFunction<z.infer<TParams>, z.infer<TQuery>, z.infer<TBody>, TContext, TMetadata>,
-  ): OriginalRouteHandler {
+  handler(handler: HandlerFunction<z.infer<TParams>, z.infer<TQuery>, z.infer<TBody>, TContext>): OriginalRouteHandler {
     return async (request, context): Promise<Response> => {
       try {
         const url = new URL(request.url);
@@ -178,23 +156,11 @@ export class RouteHandlerBuilder<
           }
         }
 
-        // Validate the metadata against the provided schema
-        if (this.metadataSchema) {
-          const metadataResult = this.metadataSchema.safeParse(this.metadataValue);
-          if (!metadataResult.success) {
-            console.error("Error: You define a metadata schema but didn't provide a metadata value.");
-            throw new InternalRouteHandlerError(
-              JSON.stringify({ message: 'Invalid metadata (Server Side)', errors: metadataResult.error.issues }),
-            );
-          }
-        }
-
         // Execute middlewares and build context
         let middlewareContext: TContext = {} as TContext;
         for (const middleware of this.middlewares) {
           const result = await middleware({
             request,
-            metadata: this.metadataValue,
             context: middlewareContext,
           });
           middlewareContext = { ...middlewareContext, ...result };
@@ -206,7 +172,6 @@ export class RouteHandlerBuilder<
           query: query as z.infer<TQuery>,
           body: body as z.infer<TBody>,
           data: middlewareContext,
-          metadata: this.metadataValue,
         });
         return result;
       } catch (error) {

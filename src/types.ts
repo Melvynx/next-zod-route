@@ -1,12 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Schema } from 'zod';
 
-export type HandlerFunction<TParams, TQuery, TBody, TContext, TMetadata> = (
+export type HandlerFunction<TParams, TQuery, TBody, TContext> = (
   request: Request,
-  context: { params: TParams; query: TQuery; body: TBody; data: TContext; metadata: TMetadata },
+  context: { params: TParams; query: TQuery; body: TBody; data: TContext },
 ) => any;
-
-export type MetadataSchema = Schema | undefined;
 
 export interface RouteHandlerBuilderConfig {
   paramsSchema: Schema;
