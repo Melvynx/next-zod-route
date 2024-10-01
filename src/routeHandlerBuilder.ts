@@ -119,9 +119,9 @@ export class RouteHandlerBuilder<
     return async (request, context): Promise<Response> => {
       try {
         const url = new URL(request.url);
-        const params = context?.params || {};
-        const query = Object.fromEntries(url.searchParams.entries());
-        const body = request.method !== 'GET' ? await request.json() : {};
+        let params = context?.params || {};
+        let query = Object.fromEntries(url.searchParams.entries());
+        let body = request.method !== 'GET' ? await request.json() : {};
 
         // Validate the params against the provided schema
         if (this.config.paramsSchema) {
@@ -131,6 +131,7 @@ export class RouteHandlerBuilder<
               JSON.stringify({ message: 'Invalid params', errors: paramsResult.error.issues }),
             );
           }
+          params = paramsResult.data;
         }
 
         // Validate the query against the provided schema
@@ -141,6 +142,7 @@ export class RouteHandlerBuilder<
               JSON.stringify({ message: 'Invalid query', errors: queryResult.error.issues }),
             );
           }
+          query = queryResult.data;
         }
 
         // Validate the body against the provided schema
@@ -151,6 +153,7 @@ export class RouteHandlerBuilder<
               JSON.stringify({ message: 'Invalid body', errors: bodyResult.error.issues }),
             );
           }
+          body = bodyResult.data;
         }
 
         // Execute middlewares and build context
