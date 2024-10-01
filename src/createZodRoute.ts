@@ -1,15 +1,9 @@
-import { z } from 'zod';
-
 import { RouteHandlerBuilder } from './routeHandlerBuilder';
 import { HandlerServerErrorFn } from './types';
 
-export function createZodRoute<MetadataSchema extends z.Schema | undefined = undefined>(params?: {
-  handleServerError?: HandlerServerErrorFn;
-  defineMetadataSchema?: () => MetadataSchema;
-}) {
+export function createZodRoute(params?: { handleServerError?: HandlerServerErrorFn }) {
   return new RouteHandlerBuilder({
     handleServerError: params?.handleServerError,
-    metadataValue: undefined,
     contextType: {},
   });
 }

@@ -43,7 +43,6 @@ export class RouteHandlerBuilder<
     },
     middlewares = [],
     handleServerError,
-    metadataValue,
     contextType,
   }: {
     config?: {
@@ -53,13 +52,11 @@ export class RouteHandlerBuilder<
     };
     middlewares?: Middleware<TContext, TMetadata>[];
     handleServerError?: HandlerServerErrorFn;
-    metadataValue: TMetadata;
     contextType: TContext;
   }) {
     this.config = config;
     this.middlewares = middlewares;
     this.handleServerError = handleServerError;
-    this.metadataValue = metadataValue;
     this.contextType = contextType as TContext;
   }
 
@@ -69,7 +66,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   params<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder({
+    return new RouteHandlerBuilder<T, TQuery, TBody, TContext, TMetadata>({
       ...this,
       config: { ...this.config, paramsSchema: schema },
     });
@@ -81,7 +78,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   query<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder({
+    return new RouteHandlerBuilder<TParams, T, TBody, TContext, TMetadata>({
       ...this,
       config: { ...this.config, querySchema: schema },
     });
@@ -93,7 +90,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   body<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder({
+    return new RouteHandlerBuilder<TParams, TQuery, T, TContext, TMetadata>({
       ...this,
       config: { ...this.config, bodySchema: schema },
     });
