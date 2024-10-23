@@ -15,6 +15,10 @@ const bodySchema = z.object({
   field: z.string(),
 });
 
+export const paramsToPromise = (params: Record<string, unknown>): Promise<Record<string, unknown>> => {
+  return Promise.resolve(params);
+};
+
 describe('params validation', () => {
   it('should validate and handle valid params', async () => {
     const GET = createZodRoute()
@@ -26,7 +30,7 @@ describe('params validation', () => {
       });
 
     const request = new Request('http://localhost/');
-    const response = await GET(request, { params: { id: '550e8400-e29b-41d4-a716-446655440000' } });
+    const response = await GET(request, { params: paramsToPromise({ id: '550e8400-e29b-41d4-a716-446655440000' }) });
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -42,7 +46,7 @@ describe('params validation', () => {
       });
 
     const request = new Request('http://localhost/');
-    const response = await GET(request, { params: { id: 'invalid-uuid' } });
+    const response = await GET(request, { params: paramsToPromise({ id: 'invalid-uuid' }) });
     const data = await response.json();
 
     expect(response.status).toBe(400);
@@ -143,7 +147,7 @@ describe('combined validation', () => {
       body: JSON.stringify({ field: 'test-field' }),
     });
 
-    const response = await POST(request, { params: { id: '550e8400-e29b-41d4-a716-446655440000' } });
+    const response = await POST(request, { params: paramsToPromise({ id: '550e8400-e29b-41d4-a716-446655440000' }) });
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -172,7 +176,7 @@ describe('combined validation', () => {
       body: JSON.stringify({ field: 'test-field' }),
     });
 
-    const response = await POST(request, { params: { id: 'invalid-uuid' } });
+    const response = await POST(request, { params: paramsToPromise({ id: 'invalid-uuid' }) });
     const data = await response.json();
 
     expect(response.status).toBe(400);
@@ -197,7 +201,7 @@ describe('combined validation', () => {
       body: JSON.stringify({ field: 'test-field' }),
     });
 
-    const response = await POST(request, { params: { id: '550e8400-e29b-41d4-a716-446655440000' } });
+    const response = await POST(request, { params: paramsToPromise({ id: '550e8400-e29b-41d4-a716-446655440000' }) });
     const data = await response.json();
 
     expect(response.status).toBe(400);
@@ -222,7 +226,7 @@ describe('combined validation', () => {
       body: JSON.stringify({ field: 123 }),
     });
 
-    const response = await POST(request, { params: { id: '550e8400-e29b-41d4-a716-446655440000' } });
+    const response = await POST(request, { params: paramsToPromise({ id: '550e8400-e29b-41d4-a716-446655440000' }) });
     const data = await response.json();
 
     expect(response.status).toBe(400);
@@ -247,7 +251,7 @@ describe('combined validation', () => {
       });
 
     const request = new Request('http://localhost/');
-    const response = await GET(request, { params: { id: '550e8400-e29b-41d4-a716-446655440000' } });
+    const response = await GET(request, { params: paramsToPromise({ id: '550e8400-e29b-41d4-a716-446655440000' }) });
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -281,7 +285,7 @@ describe('combined validation', () => {
       });
 
     const request = new Request('http://localhost/');
-    const response = await GET(request, { params: { id: '550e8400-e29b-41d4-a716-446655440000' } });
+    const response = await GET(request, { params: paramsToPromise({ id: '550e8400-e29b-41d4-a716-446655440000' }) });
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -316,7 +320,7 @@ describe('combined validation', () => {
       });
 
     const request = new Request('http://localhost/');
-    const response = await GET(request, { params: { id: '550e8400-e29b-41d4-a716-446655440000' } });
+    const response = await GET(request, { params: paramsToPromise({ id: '550e8400-e29b-41d4-a716-446655440000' }) });
     const data = await response.json();
 
     expect(response.status).toBe(400);

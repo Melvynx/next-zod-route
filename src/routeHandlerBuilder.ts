@@ -119,7 +119,7 @@ export class RouteHandlerBuilder<
     return async (request, context): Promise<Response> => {
       try {
         const url = new URL(request.url);
-        let params = context?.params || {};
+        let params = context?.params ? await context.params : {};
         let query = Object.fromEntries(url.searchParams.entries());
         let body = request.method !== 'GET' ? await request.json() : {};
 
