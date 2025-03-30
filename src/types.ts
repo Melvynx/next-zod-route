@@ -9,10 +9,10 @@ import { Schema } from 'zod';
  * @param context - The context object
  * @returns The response from the route handler
  */
-export type HandlerFunction<TParams, TQuery, TBody, TContext, TMetadata = unknown> = (
+export type HandlerFunction<TParams, TQuery, TBody, TContext, TMetadata = unknown, TReturn = any> = (
   request: Request,
   context: { params: TParams; query: TQuery; body: TBody; ctx: TContext; metadata?: TMetadata },
-) => any;
+) => TReturn;
 
 /**
  * Represents the merged context type between the existing context and new context added by middleware
@@ -76,7 +76,10 @@ export interface RouteHandlerBuilderConfig {
  * Original Next.js route handler type for reference
  * This is the type that Next.js uses internally before our library wraps it
  */
-export type OriginalRouteHandler = (request: Request, context: { params: Promise<Record<string, unknown>> }) => any;
+export type OriginalRouteHandler<TReturn = any> = (
+  request: Request,
+  context: { params: Promise<Record<string, unknown>> },
+) => TReturn;
 
 /**
  * Function that handles server errors in route handlers
@@ -84,3 +87,8 @@ export type OriginalRouteHandler = (request: Request, context: { params: Promise
  * @returns Response object with appropriate error details and status code
  */
 export type HandlerServerErrorFn = (error: Error) => Response;
+
+/**
+ * Utility type to extract the return type of a route handler
+ */
+export type RouteResponse<T> = T extends OriginalRouteHandler<infer R> ? Awaited<R> : never;

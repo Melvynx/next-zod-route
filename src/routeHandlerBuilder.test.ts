@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
@@ -48,7 +49,7 @@ describe('params validation', () => {
 
     const request = new Request('http://localhost/');
     const response = await GET(request, { params: paramsToPromise({ id: 'invalid-uuid' }) });
-    const data = await response.json();
+    const data = (await response.json()) as any;
 
     expect(response.status).toBe(400);
     expect(data.message).toBe('Invalid params');
@@ -83,7 +84,7 @@ describe('query validation', () => {
 
     const request = new Request('http://localhost/?search=');
     const response = await GET(request, { params: Promise.resolve({}) });
-    const data = await response.json();
+    const data = (await response.json()) as any;
 
     expect(response.status).toBe(400);
     expect(data.message).toBe('Invalid query');
@@ -124,7 +125,7 @@ describe('body validation', () => {
       body: JSON.stringify({ field: 123 }),
     });
     const response = await POST(request, { params: Promise.resolve({}) });
-    const data = await response.json();
+    const data = (await response.json()) as any;
 
     expect(response.status).toBe(400);
     expect(data.message).toBe('Invalid body');
@@ -145,7 +146,7 @@ describe('body validation', () => {
     const response = await POST(request, { params: Promise.resolve({}) });
 
     expect(response.status).toBe(400); // Should fail with 400 since body is required but not provided
-    const data = await response.json();
+    const data = (await response.json()) as any;
     expect(data.message).toBe('Invalid body');
   });
 
@@ -162,7 +163,7 @@ describe('body validation', () => {
     const response = await POST(request, { params: Promise.resolve({}) });
 
     expect(response.status).toBe(200); // Should fail with 400 since body is required but not provided
-    const data = await response.json();
+    const data = (await response.json()) as any;
     expect(data.success).toBe(true);
   });
 });
@@ -216,7 +217,7 @@ describe('combined validation', () => {
     });
 
     const response = await POST(request, { params: paramsToPromise({ id: 'invalid-uuid' }) });
-    const data = await response.json();
+    const data = (await response.json()) as any;
 
     expect(response.status).toBe(400);
     expect(data.message).toBe('Invalid params');
@@ -241,7 +242,7 @@ describe('combined validation', () => {
     });
 
     const response = await POST(request, { params: paramsToPromise({ id: '550e8400-e29b-41d4-a716-446655440000' }) });
-    const data = await response.json();
+    const data = (await response.json()) as any;
 
     expect(response.status).toBe(400);
     expect(data.message).toBe('Invalid query');
@@ -266,7 +267,7 @@ describe('combined validation', () => {
     });
 
     const response = await POST(request, { params: paramsToPromise({ id: '550e8400-e29b-41d4-a716-446655440000' }) });
-    const data = await response.json();
+    const data = (await response.json()) as any;
 
     expect(response.status).toBe(400);
     expect(data.message).toBe('Invalid body');
@@ -420,7 +421,7 @@ describe('form data handling', () => {
     });
 
     const response = await POST(request, { params: Promise.resolve({}) });
-    const data = await response.json();
+    const data = (await response.json()) as any;
 
     expect(response.status).toBe(200);
     expect(data).toEqual({ field: '' });
@@ -543,7 +544,7 @@ describe('metadata validation', () => {
     const response = await GET(request, {
       params: Promise.resolve({}),
     });
-    const data = await response.json();
+    const data = (await response.json()) as any;
 
     expect(response.status).toBe(400);
     expect(data.message).toBe('Invalid metadata');
@@ -978,5 +979,28 @@ describe('permission checking with metadata', () => {
       authorized: true,
       logged: true,
     });
+  });
+});
+
+describe('handler return type', () => {
+  it('should ensure handler returns a Response type', () => {
+    const GET = createZodRoute().handler(() => {
+      return Response.json({ success: true }, { status: 200 });
+    });
+
+    // This test verifies at compile time that the handler returns a Response
+    expectTypeOf(GET).toMatchTypeOf<
+      (request: Request, context: { params: Promise<Record<string, unknown>> }) => Promise<Response>
+    >();
+  });
+
+  it('should allow handler to return a Promise<Response>', () => {
+    const GET = createZodRoute().handler(async () => {
+      return Promise.resolve(Response.json({ success: true }, { status: 200 }));
+    });
+
+    expectTypeOf(GET).toMatchTypeOf<
+      (request: Request, context: { params: Promise<Record<string, unknown>> }) => Promise<Response>
+    >();
   });
 });
