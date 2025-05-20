@@ -92,3 +92,5 @@ export type HandlerServerErrorFn = (error: Error) => Response;
  * Utility type to extract the return type of a route handler
  */
 export type RouteResponse<T> = T extends OriginalRouteHandler<infer R> ? Awaited<R> : never;
+
+export type ZodRouteResponse<T> = Response & { json: () => Promise<T> };

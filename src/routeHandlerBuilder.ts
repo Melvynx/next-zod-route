@@ -31,6 +31,7 @@ export class RouteHandlerBuilder<
   // eslint-disable-next-line @typescript-eslint/ban-types
   TContext = {},
   TMetadata extends z.Schema = z.Schema,
+  TResponse extends z.Schema = z.Schema,
 > {
   readonly config: {
     paramsSchema: TParams;
@@ -49,6 +50,7 @@ export class RouteHandlerBuilder<
       querySchema: undefined as unknown as TQuery,
       bodySchema: undefined as unknown as TBody,
       metadataSchema: undefined as unknown as TMetadata,
+      responseSchema: undefined as unknown as TResponse,
     },
     middlewares = [],
     handleServerError,
@@ -60,11 +62,13 @@ export class RouteHandlerBuilder<
       querySchema: TQuery;
       bodySchema: TBody;
       metadataSchema?: TMetadata;
+      responseSchema?: TResponse;
     };
     middlewares?: Array<MiddlewareFunction<TContext, Record<string, unknown>, z.infer<TMetadata>>>;
     handleServerError?: HandlerServerErrorFn;
     contextType: TContext;
     metadataValue?: z.infer<TMetadata>;
+    responseSchema?: TResponse;
   }) {
     this.config = config;
     this.middlewares = middlewares;
@@ -106,6 +110,18 @@ export class RouteHandlerBuilder<
     return new RouteHandlerBuilder<TParams, TQuery, T, TContext, TMetadata>({
       ...this,
       config: { ...this.config, bodySchema: schema },
+    });
+  }
+
+  /**
+   * Define the schema for the response
+   * @param schema - The schema for the response
+   * @returns A new instance of the RouteHandlerBuilder
+   */
+  response<T extends z.Schema>(schema: T) {
+    return new RouteHandlerBuilder<TParams, TQuery, TBody, TContext, TMetadata, T>({
+      ...this,
+      config: { ...this.config, responseSchema: schema },
     });
   }
 
