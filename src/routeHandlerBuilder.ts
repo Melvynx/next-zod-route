@@ -31,12 +31,14 @@ export class RouteHandlerBuilder<
   // eslint-disable-next-line @typescript-eslint/ban-types
   TContext = {},
   TMetadata extends z.Schema = z.Schema,
+  TResponseSchemas extends Record<number, z.Schema> = Record<number, z.Schema>,
 > {
   readonly config: {
     paramsSchema: TParams;
     querySchema: TQuery;
     bodySchema: TBody;
     metadataSchema?: TMetadata;
+    responseSchemas: TResponseSchemas;
   };
   readonly middlewares: Array<MiddlewareFunction<TContext, Record<string, unknown>, z.infer<TMetadata>>>;
   readonly handleServerError?: HandlerServerErrorFn;
@@ -49,6 +51,7 @@ export class RouteHandlerBuilder<
       querySchema: undefined as unknown as TQuery,
       bodySchema: undefined as unknown as TBody,
       metadataSchema: undefined as unknown as TMetadata,
+      responseSchemas: {} as TResponseSchemas,
     },
     middlewares = [],
     handleServerError,
@@ -60,13 +63,17 @@ export class RouteHandlerBuilder<
       querySchema: TQuery;
       bodySchema: TBody;
       metadataSchema?: TMetadata;
+      responseSchemas?: TResponseSchemas;
     };
     middlewares?: Array<MiddlewareFunction<TContext, Record<string, unknown>, z.infer<TMetadata>>>;
     handleServerError?: HandlerServerErrorFn;
     contextType: TContext;
     metadataValue?: z.infer<TMetadata>;
   }) {
-    this.config = config;
+    this.config = {
+      ...config,
+      responseSchemas: config.responseSchemas ?? ({} as TResponseSchemas),
+    };
     this.middlewares = middlewares;
     this.handleServerError = handleServerError;
     this.contextType = contextType as TContext;
@@ -79,7 +86,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   params<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder<T, TQuery, TBody, TContext, TMetadata>({
+    return new RouteHandlerBuilder<T, TQuery, TBody, TContext, TMetadata, TResponseSchemas>({
       ...this,
       config: { ...this.config, paramsSchema: schema },
     });
@@ -91,7 +98,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   query<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder<TParams, T, TBody, TContext, TMetadata>({
+    return new RouteHandlerBuilder<TParams, T, TBody, TContext, TMetadata, TResponseSchemas>({
       ...this,
       config: { ...this.config, querySchema: schema },
     });
@@ -103,7 +110,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   body<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder<TParams, TQuery, T, TContext, TMetadata>({
+    return new RouteHandlerBuilder<TParams, TQuery, T, TContext, TMetadata, TResponseSchemas>({
       ...this,
       config: { ...this.config, bodySchema: schema },
     });
@@ -115,7 +122,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   defineMetadata<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder<TParams, TQuery, TBody, TContext, T>({
+    return new RouteHandlerBuilder<TParams, TQuery, TBody, TContext, T, TResponseSchemas>({
       config: { ...this.config, metadataSchema: schema },
       middlewares: [],
       handleServerError: this.handleServerError,
@@ -130,7 +137,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   metadata(value: z.infer<TMetadata>) {
-    return new RouteHandlerBuilder<TParams, TQuery, TBody, TContext, TMetadata>({
+    return new RouteHandlerBuilder<TParams, TQuery, TBody, TContext, TMetadata, TResponseSchemas>({
       ...this,
       metadataValue: value,
     });
@@ -143,14 +150,67 @@ export class RouteHandlerBuilder<
    */
   use<TNestContext extends Record<string, unknown>>(
     middleware: MiddlewareFunction<TContext, TNestContext & TContext, z.infer<TMetadata>>,
-  ): RouteHandlerBuilder<TParams, TQuery, TBody, TContext & TNestContext, TMetadata> {
+  ): RouteHandlerBuilder<TParams, TQuery, TBody, TContext & TNestContext, TMetadata, TResponseSchemas> {
     type MergedContext = TContext & TNestContext;
 
-    return new RouteHandlerBuilder<TParams, TQuery, TBody, MergedContext, TMetadata>({
+    return new RouteHandlerBuilder<TParams, TQuery, TBody, MergedContext, TMetadata, TResponseSchemas>({
       ...this,
       middlewares: [...this.middlewares, middleware],
       contextType: {} as MergedContext,
     });
+  }
+
+  /**
+   * Define the schema for the response at a specific HTTP status code
+   * @param statusCode - The HTTP status code to validate responses for
+   * @param schema - The Zod schema to validate the response body against
+   * @returns A new instance of the RouteHandlerBuilder
+   * @throws Error if the status code has already been registered
+   */
+  response<TStatusCode extends number, TSchema extends z.Schema>(
+    statusCode: TStatusCode,
+    schema: TSchema,
+  ): TStatusCode extends keyof TResponseSchemas
+    ? never
+    : RouteHandlerBuilder<
+        TParams,
+        TQuery,
+        TBody,
+        TContext,
+        TMetadata,
+        TResponseSchemas & { [K in TStatusCode]: TSchema }
+      > {
+    // Runtime check for duplicate status codes
+    if (this.config.responseSchemas && statusCode in this.config.responseSchemas) {
+      throw new Error(`Response schema for status code ${statusCode} has already been registered`);
+    }
+
+    return new RouteHandlerBuilder<
+      TParams,
+      TQuery,
+      TBody,
+      TContext,
+      TMetadata,
+      TResponseSchemas & { [K in TStatusCode]: TSchema }
+    >({
+      ...this,
+      config: {
+        ...this.config,
+        responseSchemas: {
+          ...this.config.responseSchemas,
+          [statusCode]: schema,
+        } as TResponseSchemas & { [K in TStatusCode]: TSchema },
+      },
+    }) as TStatusCode extends keyof TResponseSchemas
+      ? never
+      : RouteHandlerBuilder<
+          TParams,
+          TQuery,
+          TBody,
+          TContext,
+          TMetadata,
+          TResponseSchemas & { [K in TStatusCode]: TSchema }
+        >;
   }
 
   /**
@@ -241,6 +301,68 @@ export class RouteHandlerBuilder<
         // Execute middleware chain
         let middlewareContext: TContext = {} as TContext;
 
+        const validateResponse = async (response: Response): Promise<Response> => {
+          const statusCode = response.status;
+          const schema = this.config.responseSchemas[statusCode];
+
+          // If no schema is registered for this status code, skip validation
+          if (!schema) {
+            return response;
+          }
+
+          // Clone the response so we can read the body without consuming it
+          const clonedResponse = response.clone();
+
+          try {
+            // Try to parse the response body as JSON
+            const contentType = response.headers.get('content-type') || '';
+            if (!contentType.includes('application/json')) {
+              // If response is not JSON, skip validation
+              return response;
+            }
+
+            const bodyText = await clonedResponse.text();
+            let bodyData: unknown;
+
+            try {
+              bodyData = bodyText ? JSON.parse(bodyText) : null;
+            } catch (parseError) {
+              // If JSON parsing fails, throw validation error
+              throw new InternalRouteHandlerError(
+                JSON.stringify({
+                  message: 'Invalid response: response body is not valid JSON',
+                  errors: parseError,
+                }),
+              );
+            }
+
+            // Validate the parsed body against the schema
+            const validationResult = schema.safeParse(bodyData);
+            if (!validationResult.success) {
+              throw new InternalRouteHandlerError(
+                JSON.stringify({
+                  message: `Invalid response: response body does not match schema for status ${statusCode}`,
+                  errors: validationResult.error.issues,
+                }),
+              );
+            }
+
+            // Validation passed, return the original response
+            return response;
+          } catch (error) {
+            // Re-throw InternalRouteHandlerError, wrap other errors
+            if (error instanceof InternalRouteHandlerError) {
+              throw error;
+            }
+            throw new InternalRouteHandlerError(
+              JSON.stringify({
+                message: 'Invalid response: error validating response body',
+                errors: error,
+              }),
+            );
+          }
+        };
+
         const executeMiddlewareChain = async (index: number): Promise<Response> => {
           if (index >= this.middlewares.length) {
             try {
@@ -252,12 +374,18 @@ export class RouteHandlerBuilder<
                 metadata: metadata as z.infer<TMetadata>,
               });
 
-              if (result instanceof Response) return result;
+              let response: Response;
+              if (result instanceof Response) {
+                response = result;
+              } else {
+                response = new Response(JSON.stringify(result), {
+                  status: 200,
+                  headers: { 'Content-Type': 'application/json' },
+                });
+              }
 
-              return new Response(JSON.stringify(result), {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' },
-              });
+              // Validate the response against registered schemas
+              return await validateResponse(response);
             } catch (error) {
               return handleError(error as Error, this.handleServerError);
             }
@@ -283,7 +411,10 @@ export class RouteHandlerBuilder<
               next,
             });
 
-            if (result instanceof Response) return result;
+            if (result instanceof Response) {
+              // Validate middleware responses as well
+              return await validateResponse(result);
+            }
 
             middlewareContext = { ...middlewareContext };
             return result;
@@ -302,6 +433,17 @@ export class RouteHandlerBuilder<
 
 const handleError = (error: Error, handleServerError?: HandlerServerErrorFn): Response => {
   if (error instanceof InternalRouteHandlerError) {
+    // Check if the error message indicates response validation failure
+    try {
+      const errorData = JSON.parse(error.message);
+      if (errorData?.message?.includes('Invalid response')) {
+        // Response validation errors should return 500
+        return new Response(error.message, { status: 500 });
+      }
+    } catch {
+      // If parsing fails, treat as regular validation error
+    }
+    // Regular validation errors (params, query, body) return 400
     return new Response(error.message, { status: 400 });
   }
 

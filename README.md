@@ -13,6 +13,7 @@ A fork from [next-safe-route](https://github.com/richardsolomou/next-safe-route)
 ## Features
 
 - **✅ Schema Validation:** Automatically validates request parameters, query strings, and body content with built-in error handling.
+- **📤 Response Validation:** Validate response bodies against Zod schemas based on HTTP status codes to ensure API contract compliance.
 - **🧷 Type-Safe:** Works with full TypeScript type safety for parameters, query strings, and body content.
 - **😌 Easy to Use:** Simple and intuitive API that makes defining route handlers a breeze.
 - **🔄 Flexible Response Handling:** Return Response objects directly or return plain objects that are automatically converted to JSON responses.
@@ -112,6 +113,121 @@ return NextResponse.json({ data: 'value' }, { status: 200 });
 
 ```ts
 return { data: 'value' };
+```
+
+## Response Validation
+
+`next-zod-route` allows you to validate response bodies against Zod schemas based on HTTP status codes. This ensures that your API responses match the expected structure.
+
+### Basic Usage
+
+```ts
+import { createZodRoute } from 'next-zod-route';
+import { z } from 'zod';
+
+const successSchema = z.object({
+  success: z.boolean(),
+  data: z.string(),
+});
+
+const errorSchema = z.object({
+  error: z.string(),
+  message: z.string(),
+});
+
+export const GET = createZodRoute()
+  .response(200, successSchema)
+  .response(400, errorSchema)
+  .handler((request, context) => {
+    // This response will be validated against successSchema
+    return Response.json({ success: true, data: 'Hello World' }, { status: 200 });
+  });
+```
+
+### How It Works
+
+- The `response()` method can be called multiple times to register schemas for different status codes
+- After the handler completes, the response body is validated against the schema matching the response's status code
+- If no schema is registered for a status code, validation is skipped
+- If validation fails, a 500 error is returned with validation details
+- Only JSON responses are validated (non-JSON responses are skipped)
+
+### Validation Behavior
+
+- **Successful validation**: The response is returned as-is
+- **Validation failure**: Returns a 500 error with validation error details
+- **No schema registered**: Validation is skipped, response is returned normally
+- **Non-JSON responses**: Validation is skipped (e.g., text/plain, image/\*)
+- **Plain object returns**: Automatically converted to a 200 response and validated against the 200 schema if registered
+
+### Multiple Status Codes
+
+You can register schemas for multiple status codes:
+
+```ts
+export const POST = createZodRoute()
+  .response(201, z.object({ id: z.string(), created: z.boolean() }))
+  .response(400, z.object({ error: z.string() }))
+  .response(404, z.object({ error: z.string(), code: z.literal('NOT_FOUND') }))
+  .handler((request, context) => {
+    // Response will be validated based on the status code returned
+    return Response.json({ id: '123', created: true }, { status: 201 });
+  });
+```
+
+### Duplicate Status Codes
+
+Registering the same status code twice is not allowed and will throw an error at runtime:
+
+```ts
+const route = createZodRoute().response(200, schema1);
+
+// This will throw an error
+route.response(200, schema2); // Error: Response schema for status code 200 has already been registered
+```
+
+### Combined with Request Validation
+
+Response validation works seamlessly with request validation:
+
+```ts
+const paramsSchema = z.object({
+  id: z.string(),
+});
+
+const responseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+
+export const GET = createZodRoute()
+  .params(paramsSchema)
+  .response(200, responseSchema)
+  .handler((request, context) => {
+    const { id } = context.params;
+    // Both request params and response are validated
+    return Response.json({ id, name: 'John Doe' }, { status: 200 });
+  });
+```
+
+### Error Handling
+
+When response validation fails, a 500 error is returned:
+
+```ts
+export const GET = createZodRoute()
+  .response(200, z.object({ success: z.boolean(), data: z.string() }))
+  .handler(() => {
+    // Missing required 'data' field - will return 500
+    return Response.json({ success: true }, { status: 200 });
+  });
+
+// Response will be:
+// Status: 500
+// Body: {
+//   "message": "Invalid response: response body does not match schema for status 200",
+//   "errors": [...]
+// }
 ```
 
 ## Advanced Usage
