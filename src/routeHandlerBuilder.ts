@@ -256,7 +256,9 @@ export class RouteHandlerBuilder<
 
         // Validate the params against the provided schema
         if (this.config.paramsSchema) {
-          const paramsResult = this.config.paramsSchema.strip().safeParse(params);
+          const schema = this.config.paramsSchema as unknown as z.ZodObject;
+          const schemaToUse = this.strict ? schema.strip() : schema;
+          const paramsResult = schemaToUse.safeParse(params);
           if (!paramsResult.success) {
             throw new InternalRouteHandlerError(
               JSON.stringify({ message: 'Invalid params', errors: paramsResult.error.issues }),
@@ -270,7 +272,9 @@ export class RouteHandlerBuilder<
 
         // Validate the query against the provided schema
         if (this.config.querySchema) {
-          const queryResult = this.config.querySchema.strip().safeParse(query);
+          const schema = this.config.querySchema as unknown as z.ZodObject;
+          const schemaToUse = this.strict ? schema.strip() : schema;
+          const queryResult = schemaToUse.safeParse(query);
           if (!queryResult.success) {
             throw new InternalRouteHandlerError(
               JSON.stringify({ message: 'Invalid query', errors: queryResult.error.issues }),
@@ -284,7 +288,9 @@ export class RouteHandlerBuilder<
 
         // Validate the body against the provided schema
         if (this.config.bodySchema) {
-          const bodyResult = this.config.bodySchema.strip().safeParse(body);
+          const schema = this.config.bodySchema as unknown as z.ZodObject;
+          const schemaToUse = this.strict ? schema.strip() : schema;
+          const bodyResult = schemaToUse.safeParse(body);
           if (!bodyResult.success) {
             throw new InternalRouteHandlerError(
               JSON.stringify({ message: 'Invalid body', errors: bodyResult.error.issues }),
@@ -304,13 +310,15 @@ export class RouteHandlerBuilder<
 
         // Validate the metadata against the provided schema
         if (this.config.metadataSchema && metadata !== undefined) {
-          const metadataResult = this.config.metadataSchema.strip().safeParse(metadata);
+          const schema = this.config.metadataSchema as unknown as z.ZodObject;
+          const schemaToUse = this.strict ? schema.strip() : schema;
+          const metadataResult = schemaToUse.safeParse(metadata);
           if (!metadataResult.success) {
             throw new InternalRouteHandlerError(
               JSON.stringify({ message: 'Invalid metadata', errors: metadataResult.error.issues }),
             );
           }
-          metadata = metadataResult.data;
+          metadata = metadataResult.data as z.infer<TMetadata>;
         }
 
         // Execute middleware chain
@@ -363,8 +371,10 @@ export class RouteHandlerBuilder<
               );
             }
 
-            // Validate the parsed body against the schema with strip()
-            const validationResult = schema.strip().safeParse(bodyData);
+            // Validate the parsed body against the schema
+            const schemaToValidate = schema as unknown as z.ZodObject;
+            const schemaToUse = this.strict ? schemaToValidate.strip() : schemaToValidate;
+            const validationResult = schemaToUse.safeParse(bodyData);
             if (!validationResult.success) {
               throw new InternalRouteHandlerError(
                 JSON.stringify({
