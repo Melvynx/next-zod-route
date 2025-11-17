@@ -28,6 +28,7 @@ export class RouteHandlerBuilder<
   TParams extends z.Schema = z.Schema,
   TQuery extends z.Schema = z.Schema,
   TBody extends z.Schema = z.Schema,
+  THeaders extends z.Schema = z.ZodType<Record<string, string>>,
   // eslint-disable-next-line @typescript-eslint/ban-types
   TContext = {},
   TMetadata extends z.Schema = z.Schema,
@@ -37,6 +38,7 @@ export class RouteHandlerBuilder<
     paramsSchema: TParams;
     querySchema: TQuery;
     bodySchema: TBody;
+    headersSchema?: THeaders;
     metadataSchema?: TMetadata;
     responseSchemas: TResponseSchemas;
   };
@@ -50,6 +52,7 @@ export class RouteHandlerBuilder<
       paramsSchema: undefined as unknown as TParams,
       querySchema: undefined as unknown as TQuery,
       bodySchema: undefined as unknown as TBody,
+      headersSchema: undefined as unknown as THeaders,
       metadataSchema: undefined as unknown as TMetadata,
       responseSchemas: {} as TResponseSchemas,
     },
@@ -62,6 +65,7 @@ export class RouteHandlerBuilder<
       paramsSchema: TParams;
       querySchema: TQuery;
       bodySchema: TBody;
+      headersSchema?: THeaders;
       metadataSchema?: TMetadata;
       responseSchemas?: TResponseSchemas;
     };
@@ -86,7 +90,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   params<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder<T, TQuery, TBody, TContext, TMetadata, TResponseSchemas>({
+    return new RouteHandlerBuilder<T, TQuery, TBody, THeaders, TContext, TMetadata, TResponseSchemas>({
       ...this,
       config: { ...this.config, paramsSchema: schema },
     });
@@ -98,7 +102,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   query<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder<TParams, T, TBody, TContext, TMetadata, TResponseSchemas>({
+    return new RouteHandlerBuilder<TParams, T, TBody, THeaders, TContext, TMetadata, TResponseSchemas>({
       ...this,
       config: { ...this.config, querySchema: schema },
     });
@@ -110,9 +114,21 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   body<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder<TParams, TQuery, T, TContext, TMetadata, TResponseSchemas>({
+    return new RouteHandlerBuilder<TParams, TQuery, T, THeaders, TContext, TMetadata, TResponseSchemas>({
       ...this,
       config: { ...this.config, bodySchema: schema },
+    });
+  }
+
+  /**
+   * Define the schema for the headers
+   * @param schema - The schema for the headers
+   * @returns A new instance of the RouteHandlerBuilder
+   */
+  headers<T extends z.Schema>(schema: T) {
+    return new RouteHandlerBuilder<TParams, TQuery, TBody, T, TContext, TMetadata, TResponseSchemas>({
+      ...this,
+      config: { ...this.config, headersSchema: schema },
     });
   }
 
@@ -122,7 +138,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   defineMetadata<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder<TParams, TQuery, TBody, TContext, T, TResponseSchemas>({
+    return new RouteHandlerBuilder<TParams, TQuery, TBody, THeaders, TContext, T, TResponseSchemas>({
       config: { ...this.config, metadataSchema: schema },
       middlewares: [],
       handleServerError: this.handleServerError,
@@ -137,7 +153,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   metadata(value: z.infer<TMetadata>) {
-    return new RouteHandlerBuilder<TParams, TQuery, TBody, TContext, TMetadata, TResponseSchemas>({
+    return new RouteHandlerBuilder<TParams, TQuery, TBody, THeaders, TContext, TMetadata, TResponseSchemas>({
       ...this,
       metadataValue: value,
     });
@@ -150,10 +166,10 @@ export class RouteHandlerBuilder<
    */
   use<TNestContext extends Record<string, unknown>>(
     middleware: MiddlewareFunction<TContext, TNestContext & TContext, z.infer<TMetadata>>,
-  ): RouteHandlerBuilder<TParams, TQuery, TBody, TContext & TNestContext, TMetadata, TResponseSchemas> {
+  ): RouteHandlerBuilder<TParams, TQuery, TBody, THeaders, TContext & TNestContext, TMetadata, TResponseSchemas> {
     type MergedContext = TContext & TNestContext;
 
-    return new RouteHandlerBuilder<TParams, TQuery, TBody, MergedContext, TMetadata, TResponseSchemas>({
+    return new RouteHandlerBuilder<TParams, TQuery, TBody, THeaders, MergedContext, TMetadata, TResponseSchemas>({
       ...this,
       middlewares: [...this.middlewares, middleware],
       contextType: {} as MergedContext,
@@ -176,6 +192,7 @@ export class RouteHandlerBuilder<
         TParams,
         TQuery,
         TBody,
+        THeaders,
         TContext,
         TMetadata,
         TResponseSchemas & { [K in TStatusCode]: TSchema }
@@ -189,6 +206,7 @@ export class RouteHandlerBuilder<
       TParams,
       TQuery,
       TBody,
+      THeaders,
       TContext,
       TMetadata,
       TResponseSchemas & { [K in TStatusCode]: TSchema }
@@ -207,6 +225,7 @@ export class RouteHandlerBuilder<
           TParams,
           TQuery,
           TBody,
+          THeaders,
           TContext,
           TMetadata,
           TResponseSchemas & { [K in TStatusCode]: TSchema }
@@ -219,7 +238,14 @@ export class RouteHandlerBuilder<
    * @returns The original route handler that Next.js expects with the validation logic
    */
   handler(
-    handler: HandlerFunction<z.infer<TParams>, z.infer<TQuery>, z.infer<TBody>, TContext, z.infer<TMetadata>>,
+    handler: HandlerFunction<
+      z.infer<TParams>,
+      z.infer<TQuery>,
+      z.infer<TBody>,
+      z.infer<THeaders>,
+      TContext,
+      z.infer<TMetadata>
+    >,
   ): OriginalRouteHandler {
     return async (request, context): Promise<Response> => {
       try {
@@ -232,6 +258,19 @@ export class RouteHandlerBuilder<
           }),
         );
         let metadata = this.metadataValue;
+
+        // Extract headers from the request
+        // Headers are case-insensitive in HTTP, so we normalize to lowercase
+        const headersObject: Record<string, string> = {};
+        request.headers.forEach((value, key) => {
+          // Use lowercase key for consistency
+          const normalizedKey = key.toLowerCase();
+          // If header already exists (case-insensitive), use the first value
+          if (!(normalizedKey in headersObject)) {
+            headersObject[normalizedKey] = value;
+          }
+        });
+        let headers = headersObject;
 
         // Support both JSON and FormData parsing
         let body: unknown = {};
@@ -285,6 +324,17 @@ export class RouteHandlerBuilder<
             );
           }
           body = bodyResult.data;
+        }
+
+        // Validate the headers against the provided schema
+        if (this.config.headersSchema) {
+          const headersResult = this.config.headersSchema.safeParse(headers);
+          if (!headersResult.success) {
+            throw new InternalRouteHandlerError(
+              JSON.stringify({ message: 'Invalid headers', errors: headersResult.error.issues }),
+            );
+          }
+          headers = headersResult.data as Record<string, string>;
         }
 
         // Validate the metadata against the provided schema
@@ -370,6 +420,7 @@ export class RouteHandlerBuilder<
                 params: params as z.infer<TParams>,
                 query: query as z.infer<TQuery>,
                 body: body as z.infer<TBody>,
+                headers: headers as z.infer<THeaders>,
                 ctx: middlewareContext,
                 metadata: metadata as z.infer<TMetadata>,
               });

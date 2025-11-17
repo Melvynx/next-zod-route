@@ -9,9 +9,9 @@ import { Schema } from 'zod/v4';
  * @param context - The context object
  * @returns The response from the route handler
  */
-export type HandlerFunction<TParams, TQuery, TBody, TContext, TMetadata = unknown> = (
+export type HandlerFunction<TParams, TQuery, TBody, THeaders, TContext, TMetadata = unknown> = (
   request: Request,
-  context: { params: TParams; query: TQuery; body: TBody; ctx: TContext; metadata?: TMetadata },
+  context: { params: TParams; query: TQuery; body: TBody; headers: THeaders; ctx: TContext; metadata?: TMetadata },
 ) => any;
 
 /**
