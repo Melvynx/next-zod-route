@@ -20,7 +20,7 @@ A fork from [next-safe-route](https://github.com/richardsolomou/next-safe-route)
 - **🧪 Fully Tested:** Extensive test suite to ensure everything works reliably.
 - **🔐 Enhanced Middleware System:** Powerful middleware system with pre/post handler execution, response modification, and context chaining.
 - **🎯 Metadata Support:** Add and validate metadata for your routes with full type safety.
-- **🛡️ Custom Error Handling:** Flexible error handling with custom error handlers for both middleware and route handlers.
+- **🛡️ Custom Error Handling:** Flexible error handling with custom error handlers for both middleware and route handlers, plus customizable Zod validation error responses.
 
 ## Installation
 
@@ -212,9 +212,10 @@ export const GET = createZodRoute()
 
 ### Error Handling
 
-When response validation fails, a 500 error is returned:
+When response validation fails, you can customize the error handling using `handleZodError`. If no `handleZodError` is provided, it defaults to a 500 error:
 
 ```ts
+// Default behavior (500 error)
 export const GET = createZodRoute()
   .response(200, z.object({ success: z.boolean(), data: z.string() }))
   .handler(() => {
@@ -228,6 +229,31 @@ export const GET = createZodRoute()
 //   "message": "Invalid response: response body does not match schema for status 200",
 //   "errors": [...]
 // }
+
+// Custom error handling
+import { ZodError } from 'zod';
+
+const handleZodError = (field: string, error: ZodError) => {
+  if (field === 'response') {
+    // Handle response validation errors differently
+    return new Response(
+      JSON.stringify({
+        code: 'RESPONSE_VALIDATION_ERROR',
+        message: 'Response does not match expected schema',
+        errors: error.issues,
+      }),
+      { status: 422 },
+    );
+  }
+  // Handle other validation errors
+  return new Response(JSON.stringify({ field, errors: error.issues }), { status: 400 });
+};
+
+export const GET = createZodRoute({ handleZodError })
+  .response(200, z.object({ success: z.boolean(), data: z.string() }))
+  .handler(() => {
+    return Response.json({ success: true }, { status: 200 });
+  });
 ```
 
 ## Advanced Usage
@@ -610,13 +636,86 @@ export const GET = safeRoute
 
 By default, if no custom error handler is provided, the library will return a generic "Internal server error" message with a 500 status code to avoid information leakage.
 
+### Custom Zod Validation Error Handling
+
+You can customize how Zod validation errors (params, query, body, headers, metadata, response) are formatted by providing a `handleZodError` callback:
+
+```ts
+import { createZodRoute } from 'next-zod-route';
+import { z, ZodError } from 'zod';
+
+const handleZodError = (
+  field: 'params' | 'query' | 'body' | 'headers' | 'metadata' | 'response',
+  error: ZodError,
+) => {
+  // Customize the error response structure
+  return new Response(
+    JSON.stringify({
+      code: 'VALIDATION_ERROR',
+      field,
+      message: `Validation failed for ${field}`,
+      errors: error.issues.map((issue) => ({
+        message: issue.message,
+        path: issue.path.join('.'),
+        code: issue.code,
+      })),
+    }),
+    { status: 422 }, // Use 422 Unprocessable Entity for validation errors
+  );
+};
+
+const safeRoute = createZodRoute({
+  handleZodError,
+});
+
+export const POST = safeRoute
+  .body(z.object({ email: z.string().email(), name: z.string().min(1) }))
+  .handler((request, context) => {
+    return Response.json({ success: true });
+  });
+```
+
+The `handleZodError` function receives:
+- `field`: The type of field that failed validation ('params', 'query', 'body', 'headers', 'metadata', or 'response')
+- `error`: A `ZodError` instance containing all validation error details (accessible via `error.issues`)
+
+**Note:** `handleZodError` handles all Zod validation errors including request data (params, query, body, headers, metadata) and response validation. If `handleZodError` is not provided, response validation errors default to 500 status codes, while request validation errors default to 400.
+
+### Using Both Error Handlers
+
+You can use both `handleServerError` and `handleZodError` together:
+
+```ts
+const safeRoute = createZodRoute({
+  handleServerError: (error: Error) => {
+    // Handle unexpected server errors
+    return new Response(JSON.stringify({ message: 'Internal server error' }), { status: 500 });
+  },
+  handleZodError: (field, error) => {
+    // Handle validation errors with custom format
+    return new Response(
+      JSON.stringify({
+        error: 'Validation failed',
+        field,
+        details: error.issues,
+      }),
+      { status: 400 },
+    );
+  },
+});
+```
+
 ## Validation Errors
 
-When validation fails, the library returns appropriate error responses:
+When validation fails, the library returns appropriate error responses by default:
 
-- Invalid params: `{ message: 'Invalid params' }` with status 400
-- Invalid query: `{ message: 'Invalid query' }` with status 400
-- Invalid body: `{ message: 'Invalid body' }` with status 400
+- Invalid params: `{ message: 'Invalid params', errors: [...] }` with status 400
+- Invalid query: `{ message: 'Invalid query', errors: [...] }` with status 400
+- Invalid body: `{ message: 'Invalid body', errors: [...] }` with status 400
+- Invalid headers: `{ message: 'Invalid headers', errors: [...] }` with status 400
+- Invalid metadata: `{ message: 'Invalid metadata', errors: [...] }` with status 400
+
+You can customize these error responses using the `handleZodError` callback (see above).
 
 ## Tests
 

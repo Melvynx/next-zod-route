@@ -4,6 +4,7 @@ import z from 'zod/v4';
 import {
   HandlerFunction,
   HandlerServerErrorFn,
+  HandlerZodErrorFn,
   MiddlewareFunction,
   MiddlewareResult,
   NextFunction,
@@ -18,9 +19,18 @@ export type MiddlewareFn<TContext, TReturnType, TMetadata = unknown> = {
 };
 
 export class InternalRouteHandlerError extends Error {
-  constructor(message: string) {
+  zodError?: z.ZodError;
+  field?: 'params' | 'query' | 'body' | 'headers' | 'metadata' | 'response';
+
+  constructor(
+    message: string,
+    zodError?: z.ZodError,
+    field?: 'params' | 'query' | 'body' | 'headers' | 'metadata' | 'response',
+  ) {
     super(message);
     this.name = 'InternalRouteHandlerError';
+    this.zodError = zodError;
+    this.field = field;
   }
 }
 
@@ -28,6 +38,7 @@ export class RouteHandlerBuilder<
   TParams extends z.Schema = z.Schema,
   TQuery extends z.Schema = z.Schema,
   TBody extends z.Schema = z.Schema,
+  THeaders extends z.Schema = z.Schema,
   // eslint-disable-next-line @typescript-eslint/ban-types
   TContext = {},
   TMetadata extends z.Schema = z.Schema,
@@ -37,11 +48,13 @@ export class RouteHandlerBuilder<
     paramsSchema: TParams;
     querySchema: TQuery;
     bodySchema: TBody;
+    headersSchema?: THeaders;
     metadataSchema?: TMetadata;
     responseSchemas: TResponseSchemas;
   };
   readonly middlewares: Array<MiddlewareFunction<TContext, Record<string, unknown>, z.infer<TMetadata>>>;
   readonly handleServerError?: HandlerServerErrorFn;
+  readonly handleZodError?: HandlerZodErrorFn;
   readonly metadataValue?: z.infer<TMetadata>;
   readonly contextType!: TContext;
   readonly strict: boolean;
@@ -51,11 +64,13 @@ export class RouteHandlerBuilder<
       paramsSchema: undefined as unknown as TParams,
       querySchema: undefined as unknown as TQuery,
       bodySchema: undefined as unknown as TBody,
+      headersSchema: undefined as unknown as THeaders,
       metadataSchema: undefined as unknown as TMetadata,
       responseSchemas: {} as TResponseSchemas,
     },
     middlewares = [],
     handleServerError,
+    handleZodError,
     contextType,
     metadataValue,
     strict = false,
@@ -64,11 +79,13 @@ export class RouteHandlerBuilder<
       paramsSchema: TParams;
       querySchema: TQuery;
       bodySchema: TBody;
+      headersSchema?: THeaders;
       metadataSchema?: TMetadata;
       responseSchemas?: TResponseSchemas;
     };
     middlewares?: Array<MiddlewareFunction<TContext, Record<string, unknown>, z.infer<TMetadata>>>;
     handleServerError?: HandlerServerErrorFn;
+    handleZodError?: HandlerZodErrorFn;
     contextType: TContext;
     metadataValue?: z.infer<TMetadata>;
     strict?: boolean;
@@ -79,6 +96,7 @@ export class RouteHandlerBuilder<
     };
     this.middlewares = middlewares;
     this.handleServerError = handleServerError;
+    this.handleZodError = handleZodError;
     this.contextType = contextType as TContext;
     this.metadataValue = metadataValue;
     this.strict = strict;
@@ -90,7 +108,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   params<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder<T, TQuery, TBody, TContext, TMetadata, TResponseSchemas>({
+    return new RouteHandlerBuilder<T, TQuery, TBody, THeaders, TContext, TMetadata, TResponseSchemas>({
       ...this,
       config: { ...this.config, paramsSchema: schema },
       strict: this.strict,
@@ -103,7 +121,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   query<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder<TParams, T, TBody, TContext, TMetadata, TResponseSchemas>({
+    return new RouteHandlerBuilder<TParams, T, TBody, THeaders, TContext, TMetadata, TResponseSchemas>({
       ...this,
       config: { ...this.config, querySchema: schema },
       strict: this.strict,
@@ -116,10 +134,22 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   body<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder<TParams, TQuery, T, TContext, TMetadata, TResponseSchemas>({
+    return new RouteHandlerBuilder<TParams, TQuery, T, THeaders, TContext, TMetadata, TResponseSchemas>({
       ...this,
       config: { ...this.config, bodySchema: schema },
       strict: this.strict,
+    });
+  }
+
+  /**
+   * Define the schema for the headers
+   * @param schema - The schema for the headers
+   * @returns A new instance of the RouteHandlerBuilder
+   */
+  headers<T extends z.Schema>(schema: T) {
+    return new RouteHandlerBuilder<TParams, TQuery, TBody, T, TContext, TMetadata, TResponseSchemas>({
+      ...this,
+      config: { ...this.config, headersSchema: schema },
     });
   }
 
@@ -129,10 +159,11 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   defineMetadata<T extends z.Schema>(schema: T) {
-    return new RouteHandlerBuilder<TParams, TQuery, TBody, TContext, T, TResponseSchemas>({
+    return new RouteHandlerBuilder<TParams, TQuery, TBody, THeaders, TContext, T, TResponseSchemas>({
       config: { ...this.config, metadataSchema: schema },
       middlewares: [],
       handleServerError: this.handleServerError,
+      handleZodError: this.handleZodError,
       contextType: this.contextType,
       metadataValue: undefined,
       strict: this.strict,
@@ -145,7 +176,7 @@ export class RouteHandlerBuilder<
    * @returns A new instance of the RouteHandlerBuilder
    */
   metadata(value: z.infer<TMetadata>) {
-    return new RouteHandlerBuilder<TParams, TQuery, TBody, TContext, TMetadata, TResponseSchemas>({
+    return new RouteHandlerBuilder<TParams, TQuery, TBody, THeaders, TContext, TMetadata, TResponseSchemas>({
       ...this,
       metadataValue: value,
       strict: this.strict,
@@ -159,10 +190,10 @@ export class RouteHandlerBuilder<
    */
   use<TNestContext extends Record<string, unknown>>(
     middleware: MiddlewareFunction<TContext, TNestContext & TContext, z.infer<TMetadata>>,
-  ): RouteHandlerBuilder<TParams, TQuery, TBody, TContext & TNestContext, TMetadata, TResponseSchemas> {
+  ): RouteHandlerBuilder<TParams, TQuery, TBody, THeaders, TContext & TNestContext, TMetadata, TResponseSchemas> {
     type MergedContext = TContext & TNestContext;
 
-    return new RouteHandlerBuilder<TParams, TQuery, TBody, MergedContext, TMetadata, TResponseSchemas>({
+    return new RouteHandlerBuilder<TParams, TQuery, TBody, THeaders, MergedContext, TMetadata, TResponseSchemas>({
       ...this,
       middlewares: [...this.middlewares, middleware],
       contextType: {} as MergedContext,
@@ -184,6 +215,7 @@ export class RouteHandlerBuilder<
     TParams,
     TQuery,
     TBody,
+    THeaders,
     TContext,
     TMetadata,
     TResponseSchemas & { [K in TStatusCode]: TSchema }
@@ -197,6 +229,7 @@ export class RouteHandlerBuilder<
       TParams,
       TQuery,
       TBody,
+      THeaders,
       TContext,
       TMetadata,
       TResponseSchemas & { [K in TStatusCode]: TSchema }
@@ -219,7 +252,14 @@ export class RouteHandlerBuilder<
    * @returns The original route handler that Next.js expects with the validation logic
    */
   handler(
-    handler: HandlerFunction<z.infer<TParams>, z.infer<TQuery>, z.infer<TBody>, TContext, z.infer<TMetadata>>,
+    handler: HandlerFunction<
+      z.infer<TParams>,
+      z.infer<TQuery>,
+      z.infer<TBody>,
+      THeaders extends z.Schema ? z.infer<THeaders> : Record<string, string>,
+      TContext,
+      z.infer<TMetadata>
+    >,
   ): OriginalRouteHandler {
     return async (request, context): Promise<Response> => {
       try {
@@ -232,6 +272,13 @@ export class RouteHandlerBuilder<
           }),
         );
         let metadata = this.metadataValue;
+
+        // Extract headers from request and normalize to lowercase keys
+        const headersMap: Record<string, string> = {};
+        request.headers.forEach((value, key) => {
+          headersMap[key.toLowerCase()] = value;
+        });
+        let headers: Record<string, string> = headersMap;
 
         // Support both JSON and FormData parsing
         let body: unknown = {};
@@ -262,6 +309,8 @@ export class RouteHandlerBuilder<
           if (!paramsResult.success) {
             throw new InternalRouteHandlerError(
               JSON.stringify({ message: 'Invalid params', errors: paramsResult.error.issues }),
+              paramsResult.error,
+              'params',
             );
           }
           params = paramsResult.data as Record<string, unknown>;
@@ -278,6 +327,8 @@ export class RouteHandlerBuilder<
           if (!queryResult.success) {
             throw new InternalRouteHandlerError(
               JSON.stringify({ message: 'Invalid query', errors: queryResult.error.issues }),
+              queryResult.error,
+              'query',
             );
           }
           query = queryResult.data;
@@ -294,6 +345,8 @@ export class RouteHandlerBuilder<
           if (!bodyResult.success) {
             throw new InternalRouteHandlerError(
               JSON.stringify({ message: 'Invalid body', errors: bodyResult.error.issues }),
+              bodyResult.error,
+              'body',
             );
           }
           body = bodyResult.data;
@@ -308,6 +361,19 @@ export class RouteHandlerBuilder<
           body = {};
         }
 
+        // Validate the headers against the provided schema
+        if (this.config.headersSchema) {
+          const headersResult = this.config.headersSchema.safeParse(headers);
+          if (!headersResult.success) {
+            throw new InternalRouteHandlerError(
+              JSON.stringify({ message: 'Invalid headers', errors: headersResult.error.issues }),
+              headersResult.error,
+              'headers',
+            );
+          }
+          headers = headersResult.data as Record<string, string>;
+        }
+
         // Validate the metadata against the provided schema
         if (this.config.metadataSchema && metadata !== undefined) {
           const schema = this.config.metadataSchema as unknown as z.ZodObject;
@@ -316,6 +382,8 @@ export class RouteHandlerBuilder<
           if (!metadataResult.success) {
             throw new InternalRouteHandlerError(
               JSON.stringify({ message: 'Invalid metadata', errors: metadataResult.error.issues }),
+              metadataResult.error,
+              'metadata',
             );
           }
           metadata = metadataResult.data as z.infer<TMetadata>;
@@ -381,6 +449,8 @@ export class RouteHandlerBuilder<
                   message: `Invalid response: response body does not match schema for status ${statusCode}`,
                   errors: validationResult.error.issues,
                 }),
+                validationResult.error,
+                'response',
               );
             }
 
@@ -407,6 +477,7 @@ export class RouteHandlerBuilder<
                 params: params as z.infer<TParams>,
                 query: query as z.infer<TQuery>,
                 body: body as z.infer<TBody>,
+                headers: headers as THeaders extends z.Schema ? z.infer<THeaders> : Record<string, string>,
                 ctx: middlewareContext,
                 metadata: metadata as z.infer<TMetadata>,
               });
@@ -424,7 +495,7 @@ export class RouteHandlerBuilder<
               // Validate the response against registered schemas
               return await validateResponse(response);
             } catch (error) {
-              return handleError(error as Error, this.handleServerError);
+              return handleError(error as Error, this.handleServerError, this.handleZodError);
             }
           }
 
@@ -456,31 +527,41 @@ export class RouteHandlerBuilder<
             middlewareContext = { ...middlewareContext };
             return result;
           } catch (error) {
-            return handleError(error as Error, this.handleServerError);
+            return handleError(error as Error, this.handleServerError, this.handleZodError);
           }
         };
 
         return executeMiddlewareChain(0);
       } catch (error) {
-        return handleError(error as Error, this.handleServerError);
+        return handleError(error as Error, this.handleServerError, this.handleZodError);
       }
     };
   }
 }
 
-const handleError = (error: Error, handleServerError?: HandlerServerErrorFn): Response => {
+const handleError = (
+  error: Error,
+  handleServerError?: HandlerServerErrorFn,
+  handleZodError?: HandlerZodErrorFn,
+): Response => {
   if (error instanceof InternalRouteHandlerError) {
-    // Check if the error message indicates response validation failure
+    // Handle Zod validation errors (params, query, body, headers, metadata, response)
+    if (handleZodError && error.zodError && error.field) {
+      return handleZodError(error.field, error.zodError);
+    }
+
+    // Default behavior when handleZodError is not provided or ZodError is not available
+    // Response validation errors default to 500, others default to 400
     try {
       const errorData = JSON.parse(error.message);
       if (errorData?.message?.includes('Invalid response')) {
-        // Response validation errors should return 500
         return new Response(error.message, { status: 500 });
       }
     } catch {
       // If parsing fails, treat as regular validation error
     }
-    // Regular validation errors (params, query, body) return 400
+
+    // Regular validation errors (params, query, body, headers, metadata) return 400
     return new Response(error.message, { status: 400 });
   }
 
