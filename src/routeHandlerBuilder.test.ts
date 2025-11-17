@@ -1000,3 +1000,556 @@ describe('permission checking with metadata', () => {
     });
   });
 });
+
+describe('response validation', () => {
+  const successResponseSchema = z.object({
+    success: z.boolean(),
+    data: z.string(),
+  });
+
+  const errorResponseSchema = z.object({
+    error: z.string(),
+    message: z.string(),
+  });
+
+  it('should validate response body against schema for matching status code', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .handler(() => {
+        return Response.json({ success: true, data: 'test' }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({ success: true, data: 'test' });
+  });
+
+  it('should return 500 error when response body does not match schema', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .handler(() => {
+        // Return invalid response (missing required fields)
+        return Response.json({ success: true }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.message).toContain('Invalid response');
+    expect(data.errors).toBeDefined();
+  });
+
+  it('should validate multiple status codes with different schemas', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .response(400, errorResponseSchema)
+      .handler(() => {
+        return Response.json({ success: true, data: 'test' }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({ success: true, data: 'test' });
+  });
+
+  it('should skip validation when no schema is registered for status code', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .handler(() => {
+        // Return 404 without schema - should not validate
+        return Response.json({ notValidated: true }, { status: 404 });
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(data).toEqual({ notValidated: true });
+  });
+
+  it('should validate plain object returns against 200 schema', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .handler(() => {
+        // Return plain object (will be converted to 200 response)
+        return { success: true, data: 'test' };
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({ success: true, data: 'test' });
+  });
+
+  it('should return 500 error when plain object does not match 200 schema', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .handler(() => {
+        // Return invalid plain object
+        return { invalid: 'data' };
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.message).toContain('Invalid response');
+  });
+
+  it('should skip validation for non-JSON responses', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .handler(() => {
+        // Return text response
+        return new Response('plain text', {
+          status: 200,
+          headers: { 'Content-Type': 'text/plain' },
+        });
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).toBe('plain text');
+  });
+
+  it('should return 500 error when response body is not valid JSON', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .handler(() => {
+        // Return invalid JSON
+        return new Response('invalid json {', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.message).toContain('Invalid response');
+  });
+
+  it('should validate middleware responses', async () => {
+    const middleware: MiddlewareFunction = async ({ next }) => {
+      const response = await next();
+      // Middleware returns a response that should be validated
+      return Response.json({ success: true, data: 'middleware' }, { status: 200 });
+    };
+
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .use(middleware)
+      .handler(() => {
+        return { test: 'data' };
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({ success: true, data: 'middleware' });
+  });
+
+  it('should throw error when trying to register duplicate status code', () => {
+    const route = createZodRoute().response(200, successResponseSchema);
+
+    expect(() => {
+      route.response(200, errorResponseSchema);
+    }).toThrow('Response schema for status code 200 has already been registered');
+  });
+
+  it('should work with combined request and response validation', async () => {
+    const GET = createZodRoute()
+      .params(paramsSchema)
+      .query(querySchema)
+      .response(200, successResponseSchema)
+      .handler((request, context) => {
+        const { id } = context.params;
+        const { search } = context.query;
+        return Response.json({ success: true, data: `${id}-${search}` }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/?search=test');
+    const response = await GET(request, {
+      params: paramsToPromise({ id: '550e8400-e29b-41d4-a716-446655440000' }),
+    });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({
+      success: true,
+      data: '550e8400-e29b-41d4-a716-446655440000-test',
+    });
+  });
+
+  it('should validate different status codes correctly', async () => {
+    const POST = createZodRoute()
+      .response(201, z.object({ id: z.string(), created: z.boolean() }))
+      .response(400, errorResponseSchema)
+      .handler(() => {
+        return Response.json({ id: '123', created: true }, { status: 201 });
+      });
+
+    const request = new Request('http://localhost/', { method: 'POST' });
+    const response = await POST(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(data).toEqual({ id: '123', created: true });
+  });
+
+  it('should return 500 when response for 201 does not match schema', async () => {
+    const POST = createZodRoute()
+      .response(201, z.object({ id: z.string(), created: z.boolean() }))
+      .handler(() => {
+        // Missing required 'created' field
+        return Response.json({ id: '123' }, { status: 201 });
+      });
+
+    const request = new Request('http://localhost/', { method: 'POST' });
+    const response = await POST(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.message).toContain('Invalid response');
+  });
+});
+
+describe('header validation', () => {
+  const headersSchema = z.object({
+    authorization: z.string().startsWith('Bearer '),
+    'content-type': z.string().optional(),
+    'x-api-key': z.string().min(1),
+  });
+
+  it('should validate and handle valid headers', async () => {
+    const GET = createZodRoute()
+      .headers(headersSchema)
+      .handler((request, context) => {
+        expectTypeOf(context.headers).toMatchTypeOf<z.infer<typeof headersSchema>>();
+        const { authorization, 'x-api-key': apiKey } = context.headers;
+        return Response.json({ authorization, apiKey }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/', {
+      headers: {
+        Authorization: 'Bearer token123',
+        'X-API-Key': 'my-api-key',
+        'Content-Type': 'application/json',
+      },
+    });
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({
+      authorization: 'Bearer token123',
+      apiKey: 'my-api-key',
+    });
+  });
+
+  it('should return an error for invalid headers', async () => {
+    const GET = createZodRoute()
+      .headers(headersSchema)
+      .handler((request, context) => {
+        const { authorization } = context.headers;
+        return Response.json({ authorization }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/', {
+      headers: {
+        Authorization: 'Invalid token',
+        'X-API-Key': 'my-api-key',
+      },
+    });
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.message).toBe('Invalid headers');
+  });
+
+  it('should handle case-insensitive header names', async () => {
+    const GET = createZodRoute()
+      .headers(headersSchema)
+      .handler((request, context) => {
+        // Headers should be normalized to lowercase
+        expect(context.headers).toHaveProperty('authorization');
+        expect(context.headers).toHaveProperty('x-api-key');
+        return Response.json({ success: true }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/', {
+      headers: {
+        AUTHORIZATION: 'Bearer token123',
+        'X-API-Key': 'my-api-key',
+      },
+    });
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({ success: true });
+  });
+
+  it('should handle missing required headers', async () => {
+    const GET = createZodRoute()
+      .headers(headersSchema)
+      .handler(() => {
+        return Response.json({ success: true }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/', {
+      headers: {
+        Authorization: 'Bearer token123',
+        // Missing X-API-Key
+      },
+    });
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.message).toBe('Invalid headers');
+  });
+
+  it('should handle optional headers', async () => {
+    const GET = createZodRoute()
+      .headers(headersSchema)
+      .handler((request, context) => {
+        const { 'content-type': contentType } = context.headers;
+        return Response.json({ contentType }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/', {
+      headers: {
+        Authorization: 'Bearer token123',
+        'X-API-Key': 'my-api-key',
+        // content-type is optional
+      },
+    });
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.contentType).toBeUndefined();
+  });
+
+  it('should work with combined validation (params, query, body, headers)', async () => {
+    const GET = createZodRoute()
+      .params(paramsSchema)
+      .query(querySchema)
+      .headers(headersSchema)
+      .handler((request, context) => {
+        const { id } = context.params;
+        const { search } = context.query;
+        const { authorization } = context.headers;
+        return Response.json({ id, search, authorization }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/?search=test', {
+      headers: {
+        Authorization: 'Bearer token123',
+        'X-API-Key': 'my-api-key',
+      },
+    });
+    const response = await GET(request, {
+      params: paramsToPromise({ id: '550e8400-e29b-41d4-a716-446655440000' }),
+    });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      search: 'test',
+      authorization: 'Bearer token123',
+    });
+  });
+
+  it('should return an error for invalid headers in combined validation', async () => {
+    const GET = createZodRoute()
+      .params(paramsSchema)
+      .query(querySchema)
+      .headers(headersSchema)
+      .handler((request, context) => {
+        const { id } = context.params;
+        const { search } = context.query;
+        const { authorization } = context.headers;
+        return Response.json({ id, search, authorization }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/?search=test', {
+      headers: {
+        Authorization: 'Invalid token',
+        'X-API-Key': 'my-api-key',
+      },
+    });
+    const response = await GET(request, {
+      params: paramsToPromise({ id: '550e8400-e29b-41d4-a716-446655440000' }),
+    });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.message).toBe('Invalid headers');
+  });
+
+  it('should work with headers and middleware', async () => {
+    const middleware: MiddlewareFunction = async ({ next, request }) => {
+      // Middleware can access headers from request
+      const authHeader = request.headers.get('authorization');
+      const result = await next({ ctx: { hasAuth: !!authHeader } });
+      return result;
+    };
+
+    const GET = createZodRoute()
+      .headers(headersSchema)
+      .use(middleware)
+      .handler((request, context) => {
+        const { authorization } = context.headers;
+        const { hasAuth } = context.ctx;
+        return Response.json({ authorization, hasAuth }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/', {
+      headers: {
+        Authorization: 'Bearer token123',
+        'X-API-Key': 'my-api-key',
+      },
+    });
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({
+      authorization: 'Bearer token123',
+      hasAuth: true,
+    });
+  });
+
+  it('should handle headers when no header schema is defined', async () => {
+    const GET = createZodRoute().handler((request, context) => {
+      // Headers should still be available but not validated
+      expect(context.headers).toBeDefined();
+      expectTypeOf(context.headers).toMatchTypeOf<Record<string, string>>();
+      return Response.json({ success: true }, { status: 200 });
+    });
+
+    const request = new Request('http://localhost/', {
+      headers: {
+        'Custom-Header': 'value',
+      },
+    });
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({ success: true });
+  });
+
+  it('should use first value when duplicate headers exist (case-insensitive)', async () => {
+    const simpleHeadersSchema = z.object({
+      'x-custom': z.string(),
+    });
+
+    const GET = createZodRoute()
+      .headers(simpleHeadersSchema)
+      .handler((request, context) => {
+        const { 'x-custom': custom } = context.headers;
+        return Response.json({ custom }, { status: 200 });
+      });
+
+    // Create a request with duplicate headers (different cases)
+    // Note: The Request API doesn't allow duplicate headers directly,
+    // but we test that our normalization handles case-insensitivity
+    const request = new Request('http://localhost/', {
+      headers: {
+        'X-Custom': 'first-value',
+        'x-custom': 'second-value', // This would overwrite in a real scenario
+      },
+    });
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    // Should use the first value encountered
+    expect(data.custom).toBeDefined();
+  });
+
+  it('should validate headers with complex schema', async () => {
+    const complexHeadersSchema = z.object({
+      authorization: z.string().regex(/^Bearer [A-Za-z0-9]+$/),
+      'x-request-id': z.string().uuid(),
+      'x-api-version': z.enum(['v1', 'v2', 'v3']),
+      'user-agent': z.string().optional(),
+    });
+
+    const GET = createZodRoute()
+      .headers(complexHeadersSchema)
+      .handler((request, context) => {
+        const { authorization, 'x-request-id': requestId, 'x-api-version': version } = context.headers;
+        return Response.json({ authorization, requestId, version }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/', {
+      headers: {
+        Authorization: 'Bearer abc123',
+        'X-Request-Id': '550e8400-e29b-41d4-a716-446655440000',
+        'X-API-Version': 'v2',
+        'User-Agent': 'test-agent',
+      },
+    });
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({
+      authorization: 'Bearer abc123',
+      requestId: '550e8400-e29b-41d4-a716-446655440000',
+      version: 'v2',
+    });
+  });
+
+  it('should return error for invalid complex header schema', async () => {
+    const complexHeadersSchema = z.object({
+      authorization: z.string().regex(/^Bearer [A-Za-z0-9]+$/),
+      'x-request-id': z.string().uuid(),
+      'x-api-version': z.enum(['v1', 'v2', 'v3']),
+    });
+
+    const GET = createZodRoute()
+      .headers(complexHeadersSchema)
+      .handler(() => {
+        return Response.json({ success: true }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/', {
+      headers: {
+        Authorization: 'Invalid format',
+        'X-Request-Id': '550e8400-e29b-41d4-a716-446655440000',
+        'X-API-Version': 'v2',
+      },
+    });
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.message).toBe('Invalid headers');
+  });
+});

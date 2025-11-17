@@ -12,8 +12,9 @@ A fork from [next-safe-route](https://github.com/richardsolomou/next-safe-route)
 
 ## Features
 
-- **✅ Schema Validation:** Automatically validates request parameters, query strings, and body content with built-in error handling.
-- **🧷 Type-Safe:** Works with full TypeScript type safety for parameters, query strings, and body content.
+- **✅ Schema Validation:** Automatically validates request parameters, query strings, body content, and headers with built-in error handling.
+- **📤 Response Validation:** Validate response bodies against Zod schemas based on HTTP status codes to ensure API contract compliance.
+- **🧷 Type-Safe:** Works with full TypeScript type safety for parameters, query strings, body content, and headers.
 - **😌 Easy to Use:** Simple and intuitive API that makes defining route handlers a breeze.
 - **🔄 Flexible Response Handling:** Return Response objects directly or return plain objects that are automatically converted to JSON responses.
 - **🧪 Fully Tested:** Extensive test suite to ensure everything works reliably.
@@ -84,9 +85,9 @@ export const POST = createZodRoute()
 To define a route handler in Next.js:
 
 1. Import `createZodRoute` and `zod`.
-2. Define validation schemas for params, query, body, and metadata as needed.
-3. Use `createZodRoute()` to create a route handler, chaining `params`, `query`, `body`, and `defineMetadata` methods.
-4. Implement your handler function, accessing validated and type-safe params, query, body, and metadata through `context`.
+2. Define validation schemas for params, query, body, headers, and metadata as needed.
+3. Use `createZodRoute()` to create a route handler, chaining `params`, `query`, `body`, `headers`, and `defineMetadata` methods.
+4. Implement your handler function, accessing validated and type-safe params, query, body, headers, and metadata through `context`.
 
 ## Supported Body Formats
 
@@ -97,6 +98,163 @@ To define a route handler in Next.js:
 - **Multipart Form Data:** Supports `multipart/form-data`, enabling file uploads and complex form data parsing.
 
 The library automatically detects the content type and parses the body accordingly. For GET and DELETE requests, body parsing is skipped.
+
+## Header Validation
+
+`next-zod-route` allows you to validate request headers against Zod schemas. Headers are automatically normalized to lowercase for case-insensitive matching (as per HTTP standards) and made available in the handler context.
+
+### Basic Usage
+
+```ts
+import { createZodRoute } from 'next-zod-route';
+import { z } from 'zod';
+
+const headersSchema = z.object({
+  authorization: z.string().startsWith('Bearer '),
+  'x-api-key': z.string().min(1),
+  'content-type': z.string().optional(),
+});
+
+export const GET = createZodRoute()
+  .headers(headersSchema)
+  .handler((request, context) => {
+    const { authorization, 'x-api-key': apiKey } = context.headers;
+    // Headers are validated and type-safe
+    return Response.json({ apiKey });
+  });
+```
+
+### How It Works
+
+- The `headers()` method accepts a Zod schema that defines the expected headers
+- Headers are extracted from the request and normalized to lowercase keys
+- If validation fails, a 400 error is returned with validation details
+- Validated headers are available in the handler context with full type safety
+- Headers are validated before middleware execution (like params, query, and body)
+
+### Case-Insensitive Headers
+
+HTTP headers are case-insensitive, so `Authorization`, `authorization`, and `AUTHORIZATION` are all treated as the same header. The library normalizes all header names to lowercase:
+
+```ts
+const headersSchema = z.object({
+  authorization: z.string(),
+  'x-api-key': z.string(),
+});
+
+export const GET = createZodRoute()
+  .headers(headersSchema)
+  .handler((request, context) => {
+    // Works with any case: Authorization, AUTHORIZATION, authorization
+    const { authorization } = context.headers;
+    return Response.json({ success: true });
+  });
+```
+
+### Optional Headers
+
+You can mark headers as optional using Zod's `.optional()`:
+
+```ts
+const headersSchema = z.object({
+  authorization: z.string().startsWith('Bearer '),
+  'x-api-key': z.string().optional(),
+  'x-request-id': z.string().uuid().optional(),
+});
+
+export const GET = createZodRoute()
+  .headers(headersSchema)
+  .handler((request, context) => {
+    const { authorization, 'x-api-key': apiKey } = context.headers;
+    // apiKey may be undefined if not provided
+    return Response.json({ authorized: !!authorization, hasApiKey: !!apiKey });
+  });
+```
+
+### Complex Header Validation
+
+You can use any Zod validation methods for headers:
+
+```ts
+const headersSchema = z.object({
+  authorization: z.string().regex(/^Bearer [A-Za-z0-9]+$/),
+  'x-request-id': z.string().uuid(),
+  'x-api-version': z.enum(['v1', 'v2', 'v3']),
+  'user-agent': z.string().optional(),
+});
+
+export const GET = createZodRoute()
+  .headers(headersSchema)
+  .handler((request, context) => {
+    const { authorization, 'x-request-id': requestId, 'x-api-version': version } = context.headers;
+    return Response.json({ requestId, version });
+  });
+```
+
+### Combined with Other Validations
+
+Header validation works seamlessly with params, query, body, and metadata validation:
+
+```ts
+const paramsSchema = z.object({
+  id: z.string(),
+});
+
+const querySchema = z.object({
+  search: z.string(),
+});
+
+const headersSchema = z.object({
+  authorization: z.string().startsWith('Bearer '),
+});
+
+export const GET = createZodRoute()
+  .params(paramsSchema)
+  .query(querySchema)
+  .headers(headersSchema)
+  .handler((request, context) => {
+    const { id } = context.params;
+    const { search } = context.query;
+    const { authorization } = context.headers;
+    return Response.json({ id, search, authorized: !!authorization });
+  });
+```
+
+### Error Handling
+
+When header validation fails, a 400 error is returned:
+
+```ts
+export const GET = createZodRoute()
+  .headers(
+    z.object({
+      authorization: z.string().startsWith('Bearer '),
+    }),
+  )
+  .handler(() => {
+    return Response.json({ success: true });
+  });
+
+// Request with invalid header:
+// Headers: { Authorization: 'Invalid token' }
+// Response: 400
+// Body: {
+//   "message": "Invalid headers",
+//   "errors": [...]
+// }
+```
+
+### Headers Without Schema
+
+If no header schema is defined, headers are still available in the context but are not validated:
+
+```ts
+export const GET = createZodRoute().handler((request, context) => {
+  // Headers are available but not validated
+  const headers = context.headers; // Record<string, string>
+  return Response.json({ success: true });
+});
+```
 
 ## Response Handling
 
@@ -112,6 +270,121 @@ return NextResponse.json({ data: 'value' }, { status: 200 });
 
 ```ts
 return { data: 'value' };
+```
+
+## Response Validation
+
+`next-zod-route` allows you to validate response bodies against Zod schemas based on HTTP status codes. This ensures that your API responses match the expected structure.
+
+### Basic Usage
+
+```ts
+import { createZodRoute } from 'next-zod-route';
+import { z } from 'zod';
+
+const successSchema = z.object({
+  success: z.boolean(),
+  data: z.string(),
+});
+
+const errorSchema = z.object({
+  error: z.string(),
+  message: z.string(),
+});
+
+export const GET = createZodRoute()
+  .response(200, successSchema)
+  .response(400, errorSchema)
+  .handler((request, context) => {
+    // This response will be validated against successSchema
+    return Response.json({ success: true, data: 'Hello World' }, { status: 200 });
+  });
+```
+
+### How It Works
+
+- The `response()` method can be called multiple times to register schemas for different status codes
+- After the handler completes, the response body is validated against the schema matching the response's status code
+- If no schema is registered for a status code, validation is skipped
+- If validation fails, a 500 error is returned with validation details
+- Only JSON responses are validated (non-JSON responses are skipped)
+
+### Validation Behavior
+
+- **Successful validation**: The response is returned as-is
+- **Validation failure**: Returns a 500 error with validation error details
+- **No schema registered**: Validation is skipped, response is returned normally
+- **Non-JSON responses**: Validation is skipped (e.g., text/plain, image/\*)
+- **Plain object returns**: Automatically converted to a 200 response and validated against the 200 schema if registered
+
+### Multiple Status Codes
+
+You can register schemas for multiple status codes:
+
+```ts
+export const POST = createZodRoute()
+  .response(201, z.object({ id: z.string(), created: z.boolean() }))
+  .response(400, z.object({ error: z.string() }))
+  .response(404, z.object({ error: z.string(), code: z.literal('NOT_FOUND') }))
+  .handler((request, context) => {
+    // Response will be validated based on the status code returned
+    return Response.json({ id: '123', created: true }, { status: 201 });
+  });
+```
+
+### Duplicate Status Codes
+
+Registering the same status code twice is not allowed and will throw an error at runtime:
+
+```ts
+const route = createZodRoute().response(200, schema1);
+
+// This will throw an error
+route.response(200, schema2); // Error: Response schema for status code 200 has already been registered
+```
+
+### Combined with Request Validation
+
+Response validation works seamlessly with request validation:
+
+```ts
+const paramsSchema = z.object({
+  id: z.string(),
+});
+
+const responseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+
+export const GET = createZodRoute()
+  .params(paramsSchema)
+  .response(200, responseSchema)
+  .handler((request, context) => {
+    const { id } = context.params;
+    // Both request params and response are validated
+    return Response.json({ id, name: 'John Doe' }, { status: 200 });
+  });
+```
+
+### Error Handling
+
+When response validation fails, a 500 error is returned:
+
+```ts
+export const GET = createZodRoute()
+  .response(200, z.object({ success: z.boolean(), data: z.string() }))
+  .handler(() => {
+    // Missing required 'data' field - will return 500
+    return Response.json({ success: true }, { status: 200 });
+  });
+
+// Response will be:
+// Status: 500
+// Body: {
+//   "message": "Invalid response: response body does not match schema for status 200",
+//   "errors": [...]
+// }
 ```
 
 ## Advanced Usage
