@@ -170,16 +170,14 @@ export class RouteHandlerBuilder<
   response<TStatusCode extends number, TSchema extends z.Schema>(
     statusCode: TStatusCode,
     schema: TSchema,
-  ): TStatusCode extends keyof TResponseSchemas
-    ? never
-    : RouteHandlerBuilder<
-        TParams,
-        TQuery,
-        TBody,
-        TContext,
-        TMetadata,
-        TResponseSchemas & { [K in TStatusCode]: TSchema }
-      > {
+  ): RouteHandlerBuilder<
+    TParams,
+    TQuery,
+    TBody,
+    TContext,
+    TMetadata,
+    TResponseSchemas & { [K in TStatusCode]: TSchema }
+  > {
     // Runtime check for duplicate status codes
     if (this.config.responseSchemas && statusCode in this.config.responseSchemas) {
       throw new Error(`Response schema for status code ${statusCode} has already been registered`);
@@ -201,16 +199,7 @@ export class RouteHandlerBuilder<
           [statusCode]: schema,
         } as TResponseSchemas & { [K in TStatusCode]: TSchema },
       },
-    }) as TStatusCode extends keyof TResponseSchemas
-      ? never
-      : RouteHandlerBuilder<
-          TParams,
-          TQuery,
-          TBody,
-          TContext,
-          TMetadata,
-          TResponseSchemas & { [K in TStatusCode]: TSchema }
-        >;
+    });
   }
 
   /**
