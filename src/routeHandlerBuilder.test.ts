@@ -1000,3 +1000,235 @@ describe('permission checking with metadata', () => {
     });
   });
 });
+
+describe('response validation', () => {
+  const successResponseSchema = z.object({
+    success: z.boolean(),
+    data: z.string(),
+  });
+
+  const errorResponseSchema = z.object({
+    error: z.string(),
+    message: z.string(),
+  });
+
+  it('should validate response body against schema for matching status code', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .handler(() => {
+        return Response.json({ success: true, data: 'test' }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({ success: true, data: 'test' });
+  });
+
+  it('should return 500 error when response body does not match schema', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .handler(() => {
+        // Return invalid response (missing required fields)
+        return Response.json({ success: true }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.message).toContain('Invalid response');
+    expect(data.errors).toBeDefined();
+  });
+
+  it('should validate multiple status codes with different schemas', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .response(400, errorResponseSchema)
+      .handler(() => {
+        return Response.json({ success: true, data: 'test' }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({ success: true, data: 'test' });
+  });
+
+  it('should skip validation when no schema is registered for status code', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .handler(() => {
+        // Return 404 without schema - should not validate
+        return Response.json({ notValidated: true }, { status: 404 });
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(data).toEqual({ notValidated: true });
+  });
+
+  it('should validate plain object returns against 200 schema', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .handler(() => {
+        // Return plain object (will be converted to 200 response)
+        return { success: true, data: 'test' };
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({ success: true, data: 'test' });
+  });
+
+  it('should return 500 error when plain object does not match 200 schema', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .handler(() => {
+        // Return invalid plain object
+        return { invalid: 'data' };
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.message).toContain('Invalid response');
+  });
+
+  it('should skip validation for non-JSON responses', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .handler(() => {
+        // Return text response
+        return new Response('plain text', {
+          status: 200,
+          headers: { 'Content-Type': 'text/plain' },
+        });
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).toBe('plain text');
+  });
+
+  it('should return 500 error when response body is not valid JSON', async () => {
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .handler(() => {
+        // Return invalid JSON
+        return new Response('invalid json {', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.message).toContain('Invalid response');
+  });
+
+  it('should validate middleware responses', async () => {
+    const middleware: MiddlewareFunction = async ({ next }) => {
+      const response = await next();
+      // Middleware returns a response that should be validated
+      return Response.json({ success: true, data: 'middleware' }, { status: 200 });
+    };
+
+    const GET = createZodRoute()
+      .response(200, successResponseSchema)
+      .use(middleware)
+      .handler(() => {
+        return { test: 'data' };
+      });
+
+    const request = new Request('http://localhost/');
+    const response = await GET(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({ success: true, data: 'middleware' });
+  });
+
+  it('should throw error when trying to register duplicate status code', () => {
+    const route = createZodRoute().response(200, successResponseSchema);
+
+    expect(() => {
+      route.response(200, errorResponseSchema);
+    }).toThrow('Response schema for status code 200 has already been registered');
+  });
+
+  it('should work with combined request and response validation', async () => {
+    const GET = createZodRoute()
+      .params(paramsSchema)
+      .query(querySchema)
+      .response(200, successResponseSchema)
+      .handler((request, context) => {
+        const { id } = context.params;
+        const { search } = context.query;
+        return Response.json({ success: true, data: `${id}-${search}` }, { status: 200 });
+      });
+
+    const request = new Request('http://localhost/?search=test');
+    const response = await GET(request, {
+      params: paramsToPromise({ id: '550e8400-e29b-41d4-a716-446655440000' }),
+    });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({
+      success: true,
+      data: '550e8400-e29b-41d4-a716-446655440000-test',
+    });
+  });
+
+  it('should validate different status codes correctly', async () => {
+    const POST = createZodRoute()
+      .response(201, z.object({ id: z.string(), created: z.boolean() }))
+      .response(400, errorResponseSchema)
+      .handler(() => {
+        return Response.json({ id: '123', created: true }, { status: 201 });
+      });
+
+    const request = new Request('http://localhost/', { method: 'POST' });
+    const response = await POST(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(data).toEqual({ id: '123', created: true });
+  });
+
+  it('should return 500 when response for 201 does not match schema', async () => {
+    const POST = createZodRoute()
+      .response(201, z.object({ id: z.string(), created: z.boolean() }))
+      .handler(() => {
+        // Missing required 'created' field
+        return Response.json({ id: '123' }, { status: 201 });
+      });
+
+    const request = new Request('http://localhost/', { method: 'POST' });
+    const response = await POST(request, { params: Promise.resolve({}) });
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.message).toContain('Invalid response');
+  });
+});
