@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/ban-types */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Schema } from 'zod/v4';
+import { Schema, ZodError } from 'zod/v4';
 
 /**
  * Function that is called when the route handler is executed and all the middleware has been executed
@@ -9,9 +9,9 @@ import { Schema } from 'zod/v4';
  * @param context - The context object
  * @returns The response from the route handler
  */
-export type HandlerFunction<TParams, TQuery, TBody, TContext, TMetadata = unknown> = (
+export type HandlerFunction<TParams, TQuery, TBody, THeaders, TContext, TMetadata = unknown> = (
   request: Request,
-  context: { params: TParams; query: TQuery; body: TBody; ctx: TContext; metadata?: TMetadata },
+  context: { params: TParams; query: TQuery; body: TBody; headers: THeaders; ctx: TContext; metadata?: TMetadata },
 ) => any;
 
 /**
@@ -84,3 +84,14 @@ export type OriginalRouteHandler = (request: Request, context: { params: Promise
  * @returns Response object with appropriate error details and status code
  */
 export type HandlerServerErrorFn = (error: Error) => Response;
+
+/**
+ * Function that handles Zod validation errors in route handlers
+ * @param field - The field type that failed validation ('params' | 'query' | 'body' | 'headers' | 'metadata' | 'response')
+ * @param error - The ZodError instance containing validation error details
+ * @returns Response object with custom error structure
+ */
+export type HandlerZodErrorFn = (
+  field: 'params' | 'query' | 'body' | 'headers' | 'metadata' | 'response',
+  error: ZodError,
+) => Response;
