@@ -44,6 +44,7 @@ export class RouteHandlerBuilder<
   readonly handleServerError?: HandlerServerErrorFn;
   readonly metadataValue?: z.infer<TMetadata>;
   readonly contextType!: TContext;
+  readonly strict: boolean;
 
   constructor({
     config = {
@@ -57,6 +58,7 @@ export class RouteHandlerBuilder<
     handleServerError,
     contextType,
     metadataValue,
+    strict = false,
   }: {
     config?: {
       paramsSchema: TParams;
@@ -69,6 +71,7 @@ export class RouteHandlerBuilder<
     handleServerError?: HandlerServerErrorFn;
     contextType: TContext;
     metadataValue?: z.infer<TMetadata>;
+    strict?: boolean;
   }) {
     this.config = {
       ...config,
@@ -78,6 +81,7 @@ export class RouteHandlerBuilder<
     this.handleServerError = handleServerError;
     this.contextType = contextType as TContext;
     this.metadataValue = metadataValue;
+    this.strict = strict;
   }
 
   /**
@@ -89,6 +93,7 @@ export class RouteHandlerBuilder<
     return new RouteHandlerBuilder<T, TQuery, TBody, TContext, TMetadata, TResponseSchemas>({
       ...this,
       config: { ...this.config, paramsSchema: schema },
+      strict: this.strict,
     });
   }
 
@@ -101,6 +106,7 @@ export class RouteHandlerBuilder<
     return new RouteHandlerBuilder<TParams, T, TBody, TContext, TMetadata, TResponseSchemas>({
       ...this,
       config: { ...this.config, querySchema: schema },
+      strict: this.strict,
     });
   }
 
@@ -113,6 +119,7 @@ export class RouteHandlerBuilder<
     return new RouteHandlerBuilder<TParams, TQuery, T, TContext, TMetadata, TResponseSchemas>({
       ...this,
       config: { ...this.config, bodySchema: schema },
+      strict: this.strict,
     });
   }
 
@@ -128,6 +135,7 @@ export class RouteHandlerBuilder<
       handleServerError: this.handleServerError,
       contextType: this.contextType,
       metadataValue: undefined,
+      strict: this.strict,
     });
   }
 
@@ -140,6 +148,7 @@ export class RouteHandlerBuilder<
     return new RouteHandlerBuilder<TParams, TQuery, TBody, TContext, TMetadata, TResponseSchemas>({
       ...this,
       metadataValue: value,
+      strict: this.strict,
     });
   }
 
@@ -157,6 +166,7 @@ export class RouteHandlerBuilder<
       ...this,
       middlewares: [...this.middlewares, middleware],
       contextType: {} as MergedContext,
+      strict: this.strict,
     });
   }
 
@@ -199,6 +209,7 @@ export class RouteHandlerBuilder<
           [statusCode]: schema,
         } as TResponseSchemas & { [K in TStatusCode]: TSchema },
       },
+      strict: this.strict,
     });
   }
 
@@ -245,40 +256,55 @@ export class RouteHandlerBuilder<
 
         // Validate the params against the provided schema
         if (this.config.paramsSchema) {
-          const paramsResult = this.config.paramsSchema.safeParse(params);
+          const paramsResult = this.config.paramsSchema.strip().safeParse(params);
           if (!paramsResult.success) {
             throw new InternalRouteHandlerError(
               JSON.stringify({ message: 'Invalid params', errors: paramsResult.error.issues }),
             );
           }
           params = paramsResult.data as Record<string, unknown>;
+        } else if (this.strict && Object.keys(params).length > 0) {
+          // In strict mode, ignore params if no schema is defined
+          params = {};
         }
 
         // Validate the query against the provided schema
         if (this.config.querySchema) {
-          const queryResult = this.config.querySchema.safeParse(query);
+          const queryResult = this.config.querySchema.strip().safeParse(query);
           if (!queryResult.success) {
             throw new InternalRouteHandlerError(
               JSON.stringify({ message: 'Invalid query', errors: queryResult.error.issues }),
             );
           }
           query = queryResult.data;
+        } else if (this.strict && Object.keys(query).length > 0) {
+          // In strict mode, ignore query if no schema is defined
+          query = {};
         }
 
         // Validate the body against the provided schema
         if (this.config.bodySchema) {
-          const bodyResult = this.config.bodySchema.safeParse(body);
+          const bodyResult = this.config.bodySchema.strip().safeParse(body);
           if (!bodyResult.success) {
             throw new InternalRouteHandlerError(
               JSON.stringify({ message: 'Invalid body', errors: bodyResult.error.issues }),
             );
           }
           body = bodyResult.data;
+        } else if (
+          this.strict &&
+          body &&
+          typeof body === 'object' &&
+          body !== null &&
+          Object.keys(body as Record<string, unknown>).length > 0
+        ) {
+          // In strict mode, ignore body if no schema is defined
+          body = {};
         }
 
         // Validate the metadata against the provided schema
         if (this.config.metadataSchema && metadata !== undefined) {
-          const metadataResult = this.config.metadataSchema.safeParse(metadata);
+          const metadataResult = this.config.metadataSchema.strip().safeParse(metadata);
           if (!metadataResult.success) {
             throw new InternalRouteHandlerError(
               JSON.stringify({ message: 'Invalid metadata', errors: metadataResult.error.issues }),
@@ -294,22 +320,34 @@ export class RouteHandlerBuilder<
           const statusCode = response.status;
           const schema = this.config.responseSchemas[statusCode];
 
+          // Clone the response so we can read the body without consuming it
+          const clonedResponse = response.clone();
+
+          // Try to parse the response body as JSON
+          const contentType = response.headers.get('content-type') || '';
+          const isJson = contentType.includes('application/json');
+
+          // In strict mode, require a schema for JSON responses
+          if (this.strict && isJson && !schema) {
+            throw new InternalRouteHandlerError(
+              JSON.stringify({
+                message: `Invalid response: response validator required for status code ${statusCode} in strict mode`,
+                errors: [],
+              }),
+            );
+          }
+
           // If no schema is registered for this status code, skip validation
           if (!schema) {
             return response;
           }
 
-          // Clone the response so we can read the body without consuming it
-          const clonedResponse = response.clone();
+          // If response is not JSON, skip validation (even in strict mode)
+          if (!isJson) {
+            return response;
+          }
 
           try {
-            // Try to parse the response body as JSON
-            const contentType = response.headers.get('content-type') || '';
-            if (!contentType.includes('application/json')) {
-              // If response is not JSON, skip validation
-              return response;
-            }
-
             const bodyText = await clonedResponse.text();
             let bodyData: unknown;
 
@@ -325,8 +363,8 @@ export class RouteHandlerBuilder<
               );
             }
 
-            // Validate the parsed body against the schema
-            const validationResult = schema.safeParse(bodyData);
+            // Validate the parsed body against the schema with strip()
+            const validationResult = schema.strip().safeParse(bodyData);
             if (!validationResult.success) {
               throw new InternalRouteHandlerError(
                 JSON.stringify({
