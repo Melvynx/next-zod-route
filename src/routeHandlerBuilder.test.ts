@@ -1448,7 +1448,7 @@ describe('strict mode', () => {
         .response(200, responseSchema)
         .handler(() => {
           // Return extra properties that should be stripped
-          return Response.json({ success: true, data: 'test', extra: 'should-be-stripped' }, { status: 200 });
+          return Response.json({ success: true, data: 'test', extra: 'should-be-stripped', id: 123 }, { status: 200 });
         });
 
       const request = new Request('http://localhost/');
@@ -1456,12 +1456,52 @@ describe('strict mode', () => {
       const data = await response.json();
 
       expect(response.status).toBe(200);
-      // Note: strip() removes unknown properties, but Response.json() already serialized them
-      // The validation passes, but the response body still contains the extra properties
-      // This is expected behavior - strip() validates and returns only known properties,
-      // but we're returning the original response, not the validated data
-      expect(data.success).toBe(true);
-      expect(data.data).toBe('test');
+      // In strict mode, unknown properties should be stripped from the response
+      expect(data).toEqual({ success: true, data: 'test' });
+      expect(data.extra).toBeUndefined();
+      expect(data.id).toBeUndefined();
+    });
+
+    it('should strip unknown properties from nested objects in strict mode', async () => {
+      const responseSchema = z.object({
+        success: z.literal(true),
+        error: z.literal(false),
+        data: z.object({
+          message: z.string(),
+        }),
+      });
+
+      const GET = createZodRoute({ strict: true })
+        .response(200, responseSchema)
+        .handler(() => {
+          // Return extra properties in nested data object that should be stripped
+          return Response.json(
+            {
+              success: true,
+              error: false,
+              data: {
+                id: 123,
+                message: 'Hello World',
+              },
+            },
+            { status: 200 },
+          );
+        });
+
+      const request = new Request('http://localhost/');
+      const response = await GET(request, { params: Promise.resolve({}) });
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      // In strict mode, unknown properties (like id) should be stripped from nested objects
+      expect(data).toEqual({
+        success: true,
+        error: false,
+        data: {
+          message: 'Hello World',
+        },
+      });
+      expect(data.data.id).toBeUndefined();
     });
 
     it('should require validator for plain object returns (200) in strict mode', async () => {
@@ -1481,6 +1521,152 @@ describe('strict mode', () => {
 
       expect(response.status).toBe(200);
       expect(data).toEqual({ success: true });
+    });
+
+    it('should strip unknown properties from plain object returns in strict mode', async () => {
+      const responseSchema = z.object({
+        success: z.boolean(),
+        data: z.string(),
+      });
+
+      const GET = createZodRoute({ strict: true })
+        .response(200, responseSchema)
+        .handler(() => {
+          // Return plain object with extra properties that should be stripped
+          return { success: true, data: 'test', extra: 'should-be-stripped', id: 123 };
+        });
+
+      const request = new Request('http://localhost/');
+      const response = await GET(request, { params: Promise.resolve({}) });
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      // In strict mode, unknown properties should be stripped from plain object returns too
+      expect(data).toEqual({ success: true, data: 'test' });
+      expect(data.extra).toBeUndefined();
+      expect(data.id).toBeUndefined();
+    });
+
+    it('should NOT strip unknown properties from response in non-strict mode', async () => {
+      const responseSchema = z.object({
+        success: z.boolean(),
+        data: z.string(),
+      });
+
+      const GET = createZodRoute({ strict: false })
+        .response(200, responseSchema)
+        .handler(() => {
+          // Return extra properties that should NOT be stripped in non-strict mode
+          return Response.json({ success: true, data: 'test', extra: 'should-remain', id: 123 }, { status: 200 });
+        });
+
+      const request = new Request('http://localhost/');
+      const response = await GET(request, { params: Promise.resolve({}) });
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      // In non-strict mode, unknown properties should remain in the response
+      expect(data).toEqual({ success: true, data: 'test', extra: 'should-remain', id: 123 });
+      expect(data.extra).toBe('should-remain');
+      expect(data.id).toBe(123);
+    });
+
+    it('should strip unknown properties from deeply nested objects in strict mode', async () => {
+      const responseSchema = z.object({
+        success: z.boolean(),
+        data: z.object({
+          user: z.object({
+            name: z.string(),
+            profile: z.object({
+              email: z.string(),
+            }),
+          }),
+        }),
+      });
+
+      const GET = createZodRoute({ strict: true })
+        .response(200, responseSchema)
+        .handler(() => {
+          // Return deeply nested object with extra properties that should be stripped
+          return Response.json(
+            {
+              success: true,
+              data: {
+                id: 123, // Should be stripped
+                user: {
+                  id: 456, // Should be stripped
+                  name: 'John',
+                  age: 30, // Should be stripped
+                  profile: {
+                    id: 789, // Should be stripped
+                    email: 'john@example.com',
+                    phone: '123-456-7890', // Should be stripped
+                  },
+                },
+                extra: 'should-be-stripped', // Should be stripped
+              },
+            },
+            { status: 200 },
+          );
+        });
+
+      const request = new Request('http://localhost/');
+      const response = await GET(request, { params: Promise.resolve({}) });
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      // In strict mode, unknown properties should be stripped from all nesting levels
+      expect(data).toEqual({
+        success: true,
+        data: {
+          user: {
+            name: 'John',
+            profile: {
+              email: 'john@example.com',
+            },
+          },
+        },
+      });
+      expect(data.data.id).toBeUndefined();
+      expect(data.data.user.id).toBeUndefined();
+      expect(data.data.user.age).toBeUndefined();
+      expect(data.data.user.profile.id).toBeUndefined();
+      expect(data.data.user.profile.phone).toBeUndefined();
+      expect(data.data.extra).toBeUndefined();
+    });
+
+    it('should preserve response headers when stripping properties in strict mode', async () => {
+      const responseSchema = z.object({
+        success: z.boolean(),
+        data: z.string(),
+      });
+
+      const GET = createZodRoute({ strict: true })
+        .response(200, responseSchema)
+        .handler(() => {
+          // Return response with custom headers and extra properties
+          return new Response(JSON.stringify({ success: true, data: 'test', extra: 'should-be-stripped' }), {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Custom-Header': 'custom-value',
+              'X-Request-ID': 'req-123',
+            },
+          });
+        });
+
+      const request = new Request('http://localhost/');
+      const response = await GET(request, { params: Promise.resolve({}) });
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      // Custom headers should be preserved
+      expect(response.headers.get('X-Custom-Header')).toBe('custom-value');
+      expect(response.headers.get('X-Request-ID')).toBe('req-123');
+      expect(response.headers.get('Content-Type')).toBe('application/json');
+      // Unknown properties should be stripped
+      expect(data).toEqual({ success: true, data: 'test' });
+      expect(data.extra).toBeUndefined();
     });
 
     it('should throw error for plain object returns without validator in strict mode', async () => {

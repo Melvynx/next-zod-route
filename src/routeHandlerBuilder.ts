@@ -454,7 +454,15 @@ export class RouteHandlerBuilder<
               );
             }
 
-            // Validation passed, return the original response
+            // Validation passed
+            if (this.strict) {
+              // In strict mode, return a new response with stripped/validated data
+              return new Response(JSON.stringify(validationResult.data), {
+                status: response.status,
+                headers: Object.fromEntries(response.headers.entries()),
+              });
+            }
+            // In non-strict mode, return the original response
             return response;
           } catch (error) {
             // Re-throw InternalRouteHandlerError, wrap other errors

@@ -14,6 +14,7 @@ A fork from [next-safe-route](https://github.com/richardsolomou/next-safe-route)
 
 - **✅ Schema Validation:** Automatically validates request parameters, query strings, and body content with built-in error handling.
 - **📤 Response Validation:** Validate response bodies against Zod schemas based on HTTP status codes to ensure API contract compliance.
+- **🔒 Strict Mode:** Optional strict mode that strips unknown properties from both requests and responses, ensures API contract compliance, and prevents data leakage.
 - **🧷 Type-Safe:** Works with full TypeScript type safety for parameters, query strings, and body content.
 - **😌 Easy to Use:** Simple and intuitive API that makes defining route handlers a breeze.
 - **🔄 Flexible Response Handling:** Return Response objects directly or return plain objects that are automatically converted to JSON responses.
@@ -255,6 +256,242 @@ export const GET = createZodRoute({ handleZodError })
     return Response.json({ success: true }, { status: 200 });
   });
 ```
+
+## Strict Mode
+
+Strict mode enforces stricter validation rules for both request and response data. When enabled, it:
+
+1. **Strips unknown properties** from validated data (using Zod's `strip()`)
+2. **Ignores request data** (params, query, body) when no schema is defined
+3. **Requires response validators** for all JSON responses
+4. **Strips unknown properties** from response bodies before returning them
+
+### Enabling Strict Mode
+
+Enable strict mode by passing `strict: true` when creating a route:
+
+```ts
+export const GET = createZodRoute({ strict: true })
+  .params(z.object({ id: z.string() }))
+  .response(200, z.object({ success: z.boolean() }))
+  .handler((request, context) => {
+    return Response.json({ success: true }, { status: 200 });
+  });
+```
+
+### Request Validation in Strict Mode
+
+#### Stripping Unknown Properties
+
+In strict mode, unknown properties are automatically stripped from validated request data:
+
+```ts
+const paramsSchema = z.object({
+  id: z.string(),
+});
+
+export const GET = createZodRoute({ strict: true })
+  .params(paramsSchema)
+  .handler((request, context) => {
+    // Even if request includes { id: '123', extra: 'data' },
+    // context.params will only contain { id: '123' }
+    const { id } = context.params;
+    // extra property is stripped
+    return Response.json({ id });
+  });
+```
+
+#### Ignoring Data Without Schemas
+
+In strict mode, if no schema is defined for params, query, or body, that data is ignored (set to empty object):
+
+```ts
+export const GET = createZodRoute({ strict: true }).handler((request, context) => {
+  // Even if params include { id: '123', extra: 'data' },
+  // context.params will be {}
+  expect(context.params).toEqual({});
+  expect(context.query).toEqual({});
+  expect(context.body).toEqual({});
+  return Response.json({ success: true });
+});
+```
+
+This ensures that only explicitly defined and validated data is available in your handler.
+
+### Response Validation in Strict Mode
+
+#### Stripping Unknown Properties from Responses
+
+In strict mode, unknown properties are stripped from response bodies before returning them:
+
+```ts
+const responseSchema = z.object({
+  success: z.literal(true),
+  error: z.literal(false),
+  data: z.object({
+    message: z.string(),
+  }),
+});
+
+export const GET = createZodRoute({ strict: true })
+  .response(200, responseSchema)
+  .handler(() => {
+    return Response.json(
+      {
+        success: true,
+        error: false,
+        data: {
+          id: 123, // This will be stripped - not in schema
+          message: 'Hello World',
+        },
+      },
+      { status: 200 },
+    );
+  });
+
+// Response will only contain:
+// {
+//   "success": true,
+//   "error": false,
+//   "data": {
+//     "message": "Hello World"
+//   }
+// }
+```
+
+This works for nested objects at any depth:
+
+```ts
+const responseSchema = z.object({
+  success: z.boolean(),
+  data: z.object({
+    user: z.object({
+      name: z.string(),
+      profile: z.object({
+        email: z.string(),
+      }),
+    }),
+  }),
+});
+
+export const GET = createZodRoute({ strict: true })
+  .response(200, responseSchema)
+  .handler(() => {
+    return Response.json(
+      {
+        success: true,
+        data: {
+          id: 123, // Stripped
+          user: {
+            id: 456, // Stripped
+            name: 'John',
+            age: 30, // Stripped
+            profile: {
+              id: 789, // Stripped
+              email: 'john@example.com',
+              phone: '123-456-7890', // Stripped
+            },
+          },
+        },
+      },
+      { status: 200 },
+    );
+  });
+
+// Response will only contain schema-defined properties:
+// {
+//   "success": true,
+//   "data": {
+//     "user": {
+//       "name": "John",
+//       "profile": {
+//         "email": "john@example.com"
+//       }
+//     }
+//   }
+// }
+```
+
+#### Requiring Response Validators
+
+In strict mode, all JSON responses must have a registered validator. If a JSON response is returned without a validator, a 500 error is returned:
+
+```ts
+export const GET = createZodRoute({ strict: true }).handler(() => {
+  // This will return a 500 error because no validator is registered for 200
+  return Response.json({ success: true }, { status: 200 });
+});
+
+// Response:
+// Status: 500
+// Body: {
+//   "message": "Invalid response: response validator required for status code 200 in strict mode"
+// }
+```
+
+Non-JSON responses (like `text/plain` or images) are exempt from this requirement:
+
+```ts
+export const GET = createZodRoute({ strict: true }).handler(() => {
+  // This is allowed - non-JSON responses don't need validators
+  return new Response('plain text', {
+    status: 200,
+    headers: { 'Content-Type': 'text/plain' },
+  });
+});
+```
+
+### Complete Example
+
+Here's a complete example showing strict mode in action:
+
+```ts
+const paramsSchema = z.object({
+  id: z.string().uuid(),
+});
+
+const querySchema = z.object({
+  search: z.string(),
+});
+
+const responseSchema = z.object({
+  id: z.string(),
+  search: z.string(),
+  message: z.string(),
+});
+
+export const GET = createZodRoute({ strict: true })
+  .params(paramsSchema)
+  .query(querySchema)
+  .response(200, responseSchema)
+  .handler((request, context) => {
+    const { id } = context.params;
+    const { search } = context.query;
+
+    // Extra properties in response will be stripped
+    return Response.json(
+      {
+        id,
+        search,
+        message: 'Hello World',
+        extra: 'will-be-stripped', // Stripped - not in schema
+        timestamp: Date.now(), // Stripped - not in schema
+      },
+      { status: 200 },
+    );
+  });
+```
+
+### When to Use Strict Mode
+
+Use strict mode when:
+
+- **API Contract Compliance**: You want to ensure responses match exactly what's documented in your API contract
+- **Data Security**: You want to prevent accidentally leaking sensitive data through extra properties
+- **Type Safety**: You want maximum type safety and want to catch issues at runtime
+- **API Versioning**: You want strict control over what data is sent/received for API versioning
+
+**Note:** Strict mode is opt-in and defaults to `false` for backward compatibility.
 
 ## Advanced Usage
 
@@ -642,12 +879,9 @@ You can customize how Zod validation errors (params, query, body, headers, metad
 
 ```ts
 import { createZodRoute } from 'next-zod-route';
-import { z, ZodError } from 'zod';
+import { ZodError, z } from 'zod';
 
-const handleZodError = (
-  field: 'params' | 'query' | 'body' | 'headers' | 'metadata' | 'response',
-  error: ZodError,
-) => {
+const handleZodError = (field: 'params' | 'query' | 'body' | 'headers' | 'metadata' | 'response', error: ZodError) => {
   // Customize the error response structure
   return new Response(
     JSON.stringify({
@@ -676,6 +910,7 @@ export const POST = safeRoute
 ```
 
 The `handleZodError` function receives:
+
 - `field`: The type of field that failed validation ('params', 'query', 'body', 'headers', 'metadata', or 'response')
 - `error`: A `ZodError` instance containing all validation error details (accessible via `error.issues`)
 
