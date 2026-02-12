@@ -301,12 +301,12 @@ export class RouteHandlerBuilder<
 }
 
 const handleError = (error: Error, handleServerError?: HandlerServerErrorFn): Response => {
-  if (error instanceof InternalRouteHandlerError) {
-    return new Response(error.message, { status: 400 });
-  }
-
   if (handleServerError) {
     return handleServerError(error as Error);
+  }
+
+  if (error instanceof InternalRouteHandlerError) {
+    return new Response(error.message, { status: 400 });
   }
 
   return new Response(JSON.stringify({ message: 'Internal server error' }), { status: 500 });
